@@ -175,36 +175,24 @@ pub mod JsonLdProcessor {
 		} else {
 			options.base.as_ref()
 		};
-		let context = if let Some(context) = ctx {
-			if context.len() == 1 {
-				if let Some(JsonOrReference::JsonObject(json)) = context[0] {
-					if let Some(ctx) = json.get("@context") {
-						match ctx.as_enum() {
-							TypedJson::Object(ctx) => vec![Some(JsonOrReference::JsonObject(ctx))],
-							TypedJson::Array(ctx) => {
-								ctx.iter().map(|value| {
-									Ok(match value.as_enum() {
-										TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(obj)),
-										TypedJson::String(reference) => Some(JsonOrReference::Reference(reference)),
-										TypedJson::Null => None,
-										_ => return Err(InvalidContextEntry.to_error(None))
-									})
-								}).collect::<Result<JsonLdContext<'a, 'b, T>>>()?
-							},
-							_ => return Err(InvalidContextEntry.to_error(None))
-						}
-					} else {
-						context
-					}
-				} else {
-					context
-				}
-			} else {
-				context
-			}
-		} else {
-			vec![None]
-		};
+		let context = ctx.map_or(Ok(vec![None]), |contexts| Ok(
+			(if contexts.len() == 1 { contexts[0].as_ref() } else { None })
+				.and_then(|ctx| match ctx {
+					JsonOrReference::JsonObject(json) => Some(json),
+					_ => None
+				}).and_then(|json| json.get("@context"))
+				.map_or(Ok(contexts), |ctx| Ok(match ctx.as_enum() {
+					TypedJson::Object(ctx) => vec![Some(JsonOrReference::JsonObject(ctx))],
+					TypedJson::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
+						TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(obj)),
+						TypedJson::String(reference) => Some(JsonOrReference::Reference(reference)),
+						TypedJson::Null => None,
+						_ => return Err(InvalidContextEntry.to_error(None))
+					})).collect::<Result<JsonLdContext<'a, 'b, T>>>()?,
+					_ => return Err(InvalidContextEntry.to_error(None))
+				}))?
+		))?;
+
 		let base_url = context_base.map(|v| Url::parse(v).unwrap());
 		let mut active_context = process_context(&mut Context::default(), context, base_url.as_ref(),
 			&options, &HashSet::new(), false, true, true).await?;
