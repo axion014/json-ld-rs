@@ -3,11 +3,16 @@ use std::borrow::{Borrow, Cow};
 use url::{Url, ParseError};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
-	todo!()
+	value.starts_with('@') && value.len() > 1 && match &value[1..] {
+		"base" | "container" | "context" | "default" | "direction" | "embed" | "explicit" | "graph" | "id" |
+			"included" | "index" | "json" | "language" | "list" | "nest" | "none" | "omitDefault" | "prefix" |
+			"preserve" | "protected" | "requireAll" | "reverse" | "set" | "type" | "value" | "version" | "vocab" => true,
+		_ => false
+	}
 }
 
 pub fn looks_like_a_jsonld_keyword(value: &str) -> bool {
-	todo!()
+	value.starts_with('@') && value.len() > 1 && !value[1..].contains(|ch: char| ch.is_ascii_alphabetic())
 }
 
 pub fn resolve(r: &str, base: Option<&Url>) -> Result<Url, ParseError> {
@@ -19,7 +24,7 @@ pub fn resolve_with_str<T: std::borrow::Borrow<str>>(r: &str, base: Option<T>) -
 }
 
 pub fn is_iri(value: &str) -> bool {
-	todo!()
+	Url::parse(value).is_ok()
 }
 
 pub trait MapCow<'a: 'b, 'b, T: ToOwned + 'a, U> {
