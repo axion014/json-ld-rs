@@ -1,3 +1,5 @@
+use std::borrow::{Borrow, Cow};
+
 use url::{Url, ParseError};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
@@ -18,6 +20,35 @@ pub fn resolve_with_str<T: std::borrow::Borrow<str>>(r: &str, base: Option<T>) -
 
 pub fn is_iri(value: &str) -> bool {
 	todo!()
+}
+
+pub trait MapCow<'a: 'b, 'b, T: ToOwned + 'a, U> {
+	fn map<'c, C: MapCowCallback<'b, 'c>>(&self, value: &'c T, cow: C) -> U where 'a: 'c;
+}
+
+pub trait MapCowCallback<'a, 'b> {
+	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> where 'a: 'c;
+}
+
+struct Borrowed;
+impl <'a, 'b: 'a> MapCowCallback<'a, 'b> for Borrowed {
+	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> where 'a: 'c {
+		Cow::Borrowed(value)
+	}
+}
+
+struct Owned;
+impl <'b> MapCowCallback<'_, 'b> for Owned {
+	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> {
+		Cow::Owned(value.to_owned())
+	}
+}
+
+pub fn map_cow<'a: 'b, 'b, T: ToOwned + 'a, U>(f: impl MapCow<'a, 'b, T, U>) -> impl Fn(&Cow<'b, T>) -> U {
+	move |value| match value {
+		Cow::Borrowed(value) => f.map(value, Borrowed),
+		Cow::Owned(value) => f.map(value.borrow(), Owned)
+	}
 }
 
 pub enum OneError<T: Iterator<Item = I>, I, E> {

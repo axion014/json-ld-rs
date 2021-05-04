@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::borrow::Cow;
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, TypedJson, Object, Array};
 use cc_traits::Get;
@@ -8,7 +9,7 @@ use url::Url;
 use async_recursion::async_recursion;
 
 use crate::{
-	Context, JsonLdContext, JsonOrReference, OwnedJsonOrReference,
+	Context, JsonLdContext, JsonOrReference,
 	JsonLdOptions, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, resolve_with_str};
@@ -67,7 +68,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 	let mut result = active_context.clone();
 	active_context.inverse_context = None;
 	if local_context.len() == 1 {
-		if let Some(JsonOrReference::JsonObject(ctx)) = local_context[0] {
+		if let Some(JsonOrReference::JsonObject(ref ctx)) = local_context[0] {
 			if let Some(v) = ctx.get("@propagate") {
 				propagate = v.as_bool().ok_or(InvalidPropagateValue.to_error(None))?;
 			}
@@ -158,15 +159,15 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 							"@base" | "@direction" | "@import" | "@language" |
 								"@propagate" | "@protected" | "@version" | "@vocab" => {},
 							_ => {
-								create_term_definition(&mut result, &mut json, key, &mut defined, options,
+								create_term_definition(&mut result, &json, key, &mut defined, options,
 									base_url, protected, override_protected, remote_contexts.clone())?;
 
 								// Scoped context validation; In the specification, this is done inside Create Term Definition,
 								// but doing it here is preferred, because minimizing async part of the code help keep things simple
 								if let Some(context) = json.get(key).unwrap().get_attr("@context") {
-									let context: JsonOrReference<'a, 'b, T> = match context.as_enum() {
-										TypedJson::String(context) => JsonOrReference::Reference(context),
-										TypedJson::Object(context) => JsonOrReference::JsonObject(context),
+									let context = match context.as_enum() {
+										TypedJson::String(context) => JsonOrReference::Reference(Cow::Borrowed(context)),
+										TypedJson::Object(context) => JsonOrReference::JsonObject(Cow::Borrowed(context)),
 										_ => return Err(InvalidScopedContext.to_error(None))
 									};
 									process_context(active_context, vec![Some(context)], base_url, options, remote_contexts,
@@ -367,8 +368,8 @@ pub fn create_term_definition<'a: 'b, 'b, T, F, R>(
 			if let Some(context_raw) = value.get("@context") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
 				let context_owned = match context_raw.as_enum() {
-					TypedJson::String(context) => OwnedJsonOrReference::Reference(context.to_owned()),
-					TypedJson::Object(context) => OwnedJsonOrReference::JsonObject(context.to_owned()),
+					TypedJson::String(context) => JsonOrReference::Reference(Cow::Owned(context.to_owned())),
+					TypedJson::Object(context) => JsonOrReference::JsonObject(Cow::Owned(context.to_owned())),
 					_ => return Err(InvalidScopedContext.to_error(None))
 				};
 				definition.context = Some(context_owned);

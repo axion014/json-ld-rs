@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::collections::HashMap;
+use std::borrow::Cow;
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson};
+use json_trait::{ForeignMutableJson, BuildableJson};
 
 mod remote;
 mod context;
@@ -14,15 +15,9 @@ use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum JsonOrReference<'a: 'b, 'b, T: ForeignJson<'a>> {
-	JsonObject(&'b T::Object),
-	Reference(&'b str),
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum OwnedJsonOrReference<'a, T: ForeignJson<'a>> {
-	JsonObject(T::Object),
-	Reference(String),
+pub enum JsonOrReference<'a: 'b, 'b, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
+	JsonObject(Cow<'b, T::Object>),
+	Reference(Cow<'b, str>),
 }
 
 pub enum Document<'a, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
@@ -62,13 +57,16 @@ pub enum Direction {
 }
 
 #[derive(Clone)]
-struct TermDefinition<'a, T: ForeignMutableJson<'a>> where T::Object: Clone {
+struct TermDefinition<'a, T> where
+	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	T::Object: Clone
+{
 	iri: Option<String>,
 	prefix: bool,
 	protected: bool,
 	reverse_property: bool,
 	base_url: Option<String>,
-	context: Option<OwnedJsonOrReference<'a, T>>,
+	context: Option<JsonOrReference<'a, 'a, T>>,
 	container_mapping: Option<Vec<String>>,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
@@ -79,7 +77,7 @@ struct TermDefinition<'a, T: ForeignMutableJson<'a>> where T::Object: Clone {
 
 #[derive(Clone)]
 pub struct Context<'a, T> where
-	T: ForeignMutableJson<'a>,
+	T: ForeignMutableJson<'a> + BuildableJson<'a>,
 	T::Object: Clone
 {
 	term_definitions: HashMap<String, TermDefinition<'a, T>>,
@@ -93,7 +91,7 @@ pub struct Context<'a, T> where
 }
 
 impl <'a, T> Default for Context<'a, T> where
-	T: ForeignMutableJson<'a>,
+	T: ForeignMutableJson<'a> + BuildableJson<'a>,
 	T::Object: Clone
 {
 	fn default() -> Self {
@@ -148,6 +146,7 @@ pub mod JsonLdProcessor {
 	use crate::remote::{self, LoadDocumentOptions};
 	use crate::context::process_context;
 	use crate::compact::compact_internal;
+	use crate::util::{map_cow, MapCow, MapCowCallback};
 
 	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, TypedJson, Array};
 	use cc_traits::Get;
@@ -175,23 +174,35 @@ pub mod JsonLdProcessor {
 		} else {
 			options.base.as_ref()
 		};
-		let context = ctx.map_or(Ok(vec![None]), |contexts| Ok(
+
+		// If context is a map having an @context entry, set context to that entry's value
+		let context = ctx.map_or(Ok(vec![None]), |contexts| {
+			struct MapContext;
+			impl <'a: 'b, 'b, T> MapCow<'a, 'b, T::Object, Option<Result<JsonLdContext<'a, 'b, T>>>> for MapContext where
+				T: ForeignMutableJson<'a> + BuildableJson<'a>
+			{
+				fn map<'c, C: MapCowCallback<'b, 'c>>(&self, json: &'c T::Object, cow: C) -> Option<Result<JsonLdContext<'a, 'b, T>>> where 'a: 'c {
+					json.get("@context").map(|ctx| match ctx.as_enum() {
+						TypedJson::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
+							// Only one level of recursion, I think
+							TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(cow.wrap(obj))),
+							TypedJson::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
+							TypedJson::Null => None,
+							_ => return Err(InvalidContextEntry.to_error(None))
+						})).collect::<Result<JsonLdContext<'a, 'b, T>>>(),
+						TypedJson::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
+						TypedJson::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
+						TypedJson::Null => Ok(vec![None]),
+						_ => Err(InvalidContextEntry.to_error(None))
+					})
+				}
+			}
 			(if contexts.len() == 1 { contexts[0].as_ref() } else { None })
 				.and_then(|ctx| match ctx {
 					JsonOrReference::JsonObject(json) => Some(json),
 					_ => None
-				}).and_then(|json| json.get("@context"))
-				.map_or(Ok(contexts), |ctx| Ok(match ctx.as_enum() {
-					TypedJson::Object(ctx) => vec![Some(JsonOrReference::JsonObject(ctx))],
-					TypedJson::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
-						TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(obj)),
-						TypedJson::String(reference) => Some(JsonOrReference::Reference(reference)),
-						TypedJson::Null => None,
-						_ => return Err(InvalidContextEntry.to_error(None))
-					})).collect::<Result<JsonLdContext<'a, 'b, T>>>()?,
-					_ => return Err(InvalidContextEntry.to_error(None))
-				}))?
-		))?;
+				}).and_then(map_cow(MapContext)).unwrap_or(Ok(contexts))
+		})?;
 
 		let base_url = context_base.map(|v| Url::parse(v).unwrap());
 		let mut active_context = process_context(&mut Context::default(), context, base_url.as_ref(),
