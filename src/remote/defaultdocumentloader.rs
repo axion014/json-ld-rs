@@ -29,9 +29,9 @@ fn process_link_headers<'a>(response: &'a Response, url: &'a url::Url) -> impl I
 }
 
 #[async_recursion(?Send)]
-pub async fn default_document_loader<'a, T>(url_str: &str, options: &Option<LoadDocumentOptions>) ->
-		Result<RemoteDocument<'a, T>, JsonLdError> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>
+pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocumentOptions>) ->
+		Result<RemoteDocument<T>, JsonLdError> where
+	T: ForeignMutableJson + BuildableJson
 {
 	let mut accept = String::from("application/ld+json");
 
@@ -100,7 +100,7 @@ pub async fn default_document_loader<'a, T>(url_str: &str, options: &Option<Load
 	Ok(RemoteDocument {
 		content_type: content_type.essence_str().to_string(),
 		context_url: context_url.map(|url| url.to_string()),
-		document: Document::ParsedJson((content_json, std::marker::PhantomData)),
+		document: Document::ParsedJson(content_json),
 		document_url,
 		profile: content_type.get_param("profile").map(|mime| mime.as_str().to_string())
 	})

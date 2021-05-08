@@ -3,7 +3,7 @@ use std::future::Future;
 use std::borrow::Cow;
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, TypedJson, Object, Array};
-use cc_traits::Get;
+use cc_traits::{Get, MapInsert};
 
 use url::Url;
 use async_recursion::async_recursion;
@@ -12,24 +12,22 @@ use crate::{
 	Context, JsonLdContext, JsonOrReference,
 	JsonLdOptions, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
-use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, resolve_with_str};
+use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, resolve_with_str, is_iri, as_compact_iri};
 use crate::error::{Result, JsonLdErrorCode::*, JsonLdError};
 use crate::remote::{load_remote, LoadDocumentOptions};
 use crate::expand::expand_iri;
 
 const MAX_CONTEXTS: usize = 1000; // The number's placeholder
 
-fn process_language<'a: 'b, 'b, T: ForeignJson<'a>>(value: &'b T) -> Result<Option<String>> {
+fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 	Ok(match value.as_enum() {
-		TypedJson::String(lang) => {
-			Some(lang.to_owned())
-		},
+		TypedJson::String(lang) => Some(lang.to_owned()),
 		TypedJson::Null => None,
 		_ => return Err(InvalidDefaultLanguage.to_error(None))
 	})
 }
 
-fn process_direction<'a: 'b, 'b, T: ForeignJson<'a>>(value: &'b T) -> Result<Option<Direction>> {
+fn process_direction<T: ForeignJson>(value: &T) -> Result<Option<Direction>> {
 	Ok(match value.as_enum() {
 		TypedJson::String(direction) => {
 			Some(match direction.as_str() {
@@ -58,12 +56,12 @@ fn process_container(container: Vec<String>) -> Result<Vec<String>> {
 
 #[async_recursion(?Send)]
 pub async fn process_context<'a: 'b, 'b, T, F, R>(
-		active_context: &'b mut Context<'a, T>, local_context: JsonLdContext<'a, 'b, T>,
-		base_url: Option<&'b Url>, options: &'b JsonLdOptions<'a, T, F, R>, remote_contexts: &'b HashSet<Url>, override_protected: bool,
+		active_context: &'b mut Context<'a, T>, local_context: JsonLdContext<'b, T>, base_url: Option<&'b Url>,
+		options: &JsonLdOptions<T, F, R>, remote_contexts: &HashSet<Url>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<'a, T>>>
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	let mut result = active_context.clone();
 	active_context.inverse_context = None;
@@ -201,13 +199,13 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 	Ok(result)
 }
 
-pub fn create_term_definition<'a: 'b, 'b, T, F, R>(
-		active_context: &'b mut Context<'a, T>, local_context: &'b T::Object, term: &'b str,
-		defined: &'b mut HashMap<String, bool>, options: &'b JsonLdOptions<'a, T, F, R>, base_url: Option<&Url>, protected: bool,
-		override_protected: bool, remote_contexts: HashSet<Url>) -> Result<()> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+pub fn create_term_definition<T, F, R>(
+		active_context: &mut Context<'_, T>, local_context: &T::Object, term: &str,
+		defined: &mut HashMap<String, bool>, options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>,
+		protected: bool, override_protected: bool, remote_contexts: HashSet<Url>) -> Result<()> where
+	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<'a, T>>>
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	if let Some(defined) = defined.get(term) {
 		if *defined { return Ok(()); }
@@ -235,7 +233,7 @@ pub fn create_term_definition<'a: 'b, 'b, T, F, R>(
 
 	let previous_definition = active_context.term_definitions.remove(term);
 
-	let mut definition: TermDefinition<'a, T> = TermDefinition {
+	let mut definition = TermDefinition {
 		iri: None,
 		prefix: false,
 		protected,

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 
 use json_trait::{ForeignMutableJson, BuildableJson};
@@ -9,13 +9,13 @@ use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
 use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, resolve_with_str};
 use crate::context::create_term_definition;
 
-pub fn expand_iri<'a: 'b, 'b, T, F, R>(
-		active_context: &'b mut Context<'a, T>, value: &'b str, options: &'b JsonLdOptions<'a, T, F, R>, document_relative: bool,
-		vocab: bool, local_context: Option<&'b T::Object>, mut defined: Option<&'b mut HashMap<String, bool>>) -> Result<Option<String>> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a> + Clone,
+pub fn expand_iri<'a, 'b: 'a, T, F, R>(
+		active_context: &'a mut Context<'b, T>, value: &'a str, options: &'a JsonLdOptions<T, F, R>, document_relative: bool,
+		vocab: bool, local_context: Option<&'a T::Object>, mut defined: Option<&'a mut HashMap<String, bool>>) -> Result<Option<String>> where
+	T: ForeignMutableJson + BuildableJson + Clone,
 	T::Object: Collection<Item = T> + for<'c> Get<&'c str> + Clone,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<'a, T>>>,
+	R: Future<Output = Result<RemoteDocument<T>>>,
 {
 	if is_jsonld_keyword(value) || value == "" { return Ok(Some(value.to_string())) }
 	if looks_like_a_jsonld_keyword(value) { return Ok(None) }

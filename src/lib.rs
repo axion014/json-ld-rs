@@ -15,40 +15,40 @@ use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum JsonOrReference<'a: 'b, 'b, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
-	JsonObject(Cow<'b, T::Object>),
-	Reference(Cow<'b, str>),
+pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
+	JsonObject(Cow<'a, T::Object>),
+	Reference(Cow<'a, str>),
 }
 
-pub enum Document<'a, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
-	ParsedJson((T, std::marker::PhantomData<&'a T>)),
+pub enum Document<T: ForeignMutableJson + BuildableJson> {
+	ParsedJson(T),
 	RawJson(String)
 }
 
-impl <'a, T: ForeignMutableJson<'a> + BuildableJson<'a>> Document<'a, T> {
-	fn to_parsed(self) -> std::result::Result<T, T::ParseError> {
+impl <T: ForeignMutableJson + BuildableJson> Document<T> {
+	fn to_parsed(self) -> std::result::Result<T, T::Err> {
 		match self {
-			Document::ParsedJson(v) => Ok(v.0),
+			Document::ParsedJson(v) => Ok(v),
 			Document::RawJson(v) => T::from_str(&v)
 		}
 	}
 }
 
-pub struct RemoteDocument<'a, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
+pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 	pub content_type: String,
 	pub context_url: Option<String>,
-	pub document: Document<'a, T>,
+	pub document: Document<T>,
 	pub document_url: String,
 	pub profile: Option<String>
 }
 
-pub enum JsonLdInput<'a, T: ForeignMutableJson<'a> + BuildableJson<'a>> {
+pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 	JsonObject(T::Object),
 	Reference(String),
-	RemoteDocument(RemoteDocument<'a, T>),
+	RemoteDocument(RemoteDocument<T>),
 }
 
-type JsonLdContext<'a, 'b, T> = Vec<Option<JsonOrReference<'a, 'b, T>>>;
+type JsonLdContext<'a, T> = Vec<Option<JsonOrReference<'a, T>>>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Direction {
@@ -58,7 +58,7 @@ pub enum Direction {
 
 #[derive(Clone)]
 struct TermDefinition<'a, T> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
 	iri: Option<String>,
@@ -66,7 +66,7 @@ struct TermDefinition<'a, T> where
 	protected: bool,
 	reverse_property: bool,
 	base_url: Option<String>,
-	context: Option<JsonOrReference<'a, 'a, T>>,
+	context: Option<JsonOrReference<'a, T>>,
 	container_mapping: Option<Vec<String>>,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
@@ -77,7 +77,7 @@ struct TermDefinition<'a, T> where
 
 #[derive(Clone)]
 pub struct Context<'a, T> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
 	term_definitions: HashMap<String, TermDefinition<'a, T>>,
@@ -90,8 +90,8 @@ pub struct Context<'a, T> where
 	previous_context: Option<Box<Context<'a, T>>>
 }
 
-impl <'a, T> Default for Context<'a, T> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+impl <T> Default for Context<'_, T> where
+	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
 	fn default() -> Self {
@@ -115,10 +115,10 @@ pub enum JsonLdProcessingMode {
 }
 
 #[derive(Clone)]
-pub struct JsonLdOptions<'a, T, F, R> where
-	T: 'a + ForeignMutableJson<'a> + BuildableJson<'a>,
+pub struct JsonLdOptions<T, F, R> where
+	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<'a, T>>>
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	pub base: Option<String>,
 
@@ -126,7 +126,7 @@ pub struct JsonLdOptions<'a, T, F, R> where
 	pub compact_to_relative: bool,
 
 	pub document_loader: Option<F>,
-	pub expand_context: Option<JsonOrReference<'a, 'a, T>>,
+	pub expand_context: Option<JsonOrReference<'static, T>>,
 	pub extract_all_scripts: bool,
 	pub frame_expansion: bool,
 	pub ordered: bool,
@@ -152,11 +152,11 @@ pub mod JsonLdProcessor {
 	use cc_traits::Get;
 	use url::Url;
 
-	pub async fn compact<'a: 'b, 'b, T, F, R>(input: &'b mut JsonLdInput<'a, T>, ctx: Option<JsonLdContext<'a, 'b, T>>,
-			options: &'b mut JsonLdOptions<'a, T, F, R>) -> Result<T> where
-		T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	pub async fn compact<T, F, R>(input: &mut JsonLdInput<T>, ctx: Option<JsonLdContext<'_, T>>,
+			options: &mut JsonLdOptions<T, F, R>) -> Result<T> where
+		T: ForeignMutableJson + BuildableJson,
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-		R: Future<Output = Result<crate::RemoteDocument<'a, T>>>
+		R: Future<Output = Result<crate::RemoteDocument<T>>>
 	{
 		if let JsonLdInput::Reference(iri) = input {
 			*input = JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?);
@@ -178,10 +178,10 @@ pub mod JsonLdProcessor {
 		// If context is a map having an @context entry, set context to that entry's value
 		let context = ctx.map_or(Ok(vec![None]), |contexts| {
 			struct MapContext;
-			impl <'a: 'b, 'b, T> MapCow<'a, 'b, T::Object, Option<Result<JsonLdContext<'a, 'b, T>>>> for MapContext where
-				T: ForeignMutableJson<'a> + BuildableJson<'a>
+			impl <'a, T> MapCow<'static, 'a, T::Object, Option<Result<JsonLdContext<'a, T>>>> for MapContext where
+				T: ForeignMutableJson + BuildableJson
 			{
-				fn map<'c, C: MapCowCallback<'b, 'c>>(&self, json: &'c T::Object, cow: C) -> Option<Result<JsonLdContext<'a, 'b, T>>> where 'a: 'c {
+				fn map<'b>(&self, json: &'b T::Object, cow: impl MapCowCallback<'a, 'b>) -> Option<Result<JsonLdContext<'a, T>>> {
 					json.get("@context").map(|ctx| match ctx.as_enum() {
 						TypedJson::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
 							// Only one level of recursion, I think
@@ -189,7 +189,7 @@ pub mod JsonLdProcessor {
 							TypedJson::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
 							TypedJson::Null => None,
 							_ => return Err(InvalidContextEntry.to_error(None))
-						})).collect::<Result<JsonLdContext<'a, 'b, T>>>(),
+						})).collect::<Result<JsonLdContext<'a, T>>>(),
 						TypedJson::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
 						TypedJson::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
 						TypedJson::Null => Ok(vec![None]),
@@ -211,20 +211,20 @@ pub mod JsonLdProcessor {
 		compact_internal(active_context, None, TypedJson::Array(&expanded_input), options.compact_arrays, options.ordered)
 	}
 
-	pub async fn expand<'a: 'b, 'b, T, F, R>(input: &'b JsonLdInput<'a, T>, options: &'b JsonLdOptions<'a, T, F, R>) ->
-			Result<<T as ForeignJson<'a>>::Array> where
-		T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	pub async fn expand<T, F, R>(input: &JsonLdInput<T>, options: &JsonLdOptions<T, F, R>) ->
+			Result<<T as ForeignJson>::Array> where
+		T: ForeignMutableJson + BuildableJson,
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-		R: Future<Output = Result<crate::RemoteDocument<'a, T>>>
+		R: Future<Output = Result<crate::RemoteDocument<T>>>
 	{
 		todo!()
 	}
 
-	pub async fn flatten<'a: 'b, 'b, T, F, R>(input: &'b JsonLdInput<'a, T>, context: Option<JsonLdContext<'a, 'b, T>>,
-			options: &'b JsonLdOptions<'a, T, F, R>) -> Result<T> where
-		T: ForeignMutableJson<'a> + BuildableJson<'a>,
+	pub async fn flatten<T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLdContext<'_, T>>,
+			options: &JsonLdOptions<T, F, R>) -> Result<T> where
+		T: ForeignMutableJson + BuildableJson,
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-		R: Future<Output = Result<crate::RemoteDocument<'a, T>>>
+		R: Future<Output = Result<crate::RemoteDocument<T>>>
 	{
 		todo!()
 	}

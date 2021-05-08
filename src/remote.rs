@@ -13,12 +13,12 @@ pub struct LoadDocumentOptions {
 	pub request_profile: Vec<String>
 }
 
-pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptions<'a, T, F, R>,
+pub async fn load_remote<T, F, R>(iri: &str, options: &JsonLdOptions<T, F, R>,
 	profile: Option<String>, request_profile: Vec<String>) ->
-		Result<RemoteDocument<'a, T>, JsonLdError> where
-	T: ForeignMutableJson<'a> + BuildableJson<'a>,
+		Result<RemoteDocument<T>, JsonLdError> where
+	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<'a, T>, JsonLdError>>
+	R: Future<Output = Result<RemoteDocument<T>, JsonLdError>>
 {
 	let load_document_options = Some(LoadDocumentOptions {
 		extract_all_scripts: options.extract_all_scripts,
