@@ -23,7 +23,7 @@ fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 	Ok(match value.as_enum() {
 		TypedJson::String(lang) => Some(lang.to_owned()),
 		TypedJson::Null => None,
-		_ => return Err(InvalidDefaultLanguage.to_error(None))
+		_ => return Err(err!(InvalidDefaultLanguage))
 	})
 }
 
@@ -33,23 +33,23 @@ fn process_direction<T: ForeignJson>(value: &T) -> Result<Option<Direction>> {
 			Some(match direction.as_str() {
 				"ltr" => Direction::LTR,
 				"rtl" => Direction::RTL,
-				_ => return Err(InvalidBaseDirection.to_error(None))
+				_ => return Err(err!(InvalidBaseDirection))
 			})
 		},
 		TypedJson::Null => None,
-		_ => return Err(InvalidBaseDirection.to_error(None))
+		_ => return Err(err!(InvalidBaseDirection))
 	})
 }
 
 fn process_container(container: Vec<String>) -> Result<Vec<String>> {
 	let len = container.len();
 	if container.iter().any(|s| s == "@list") && len > 1 {
-		return Err(InvalidContainerMapping.to_error(None));
+		return Err(err!(InvalidContainerMapping));
 	} else if container.iter().any(|s| s == "@graph") && container.iter()
 			.any(|s| s != "@graph" && s != "@id" && s != "@index" && s != "@set") {
-		return Err(InvalidContainerMapping.to_error(None));
+		return Err(err!(InvalidContainerMapping));
 	} else if len > 1 && (container.iter().all(|s| s != "@set") || len != 2) {
-		return Err(InvalidContainerMapping.to_error(None));
+		return Err(err!(InvalidContainerMapping));
 	}
 	Ok(container)
 }
@@ -68,7 +68,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 	if local_context.len() == 1 {
 		if let Some(JsonOrReference::JsonObject(ref ctx)) = local_context[0] {
 			if let Some(v) = ctx.get("@propagate") {
-				propagate = v.as_bool().ok_or(InvalidPropagateValue.to_error(None))?;
+				propagate = v.as_bool().ok_or(err!(InvalidPropagateValue))?;
 			}
 		}
 	}
@@ -79,10 +79,9 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 		if let Some(context) = context {
 			match context {
 				JsonOrReference::Reference(iri) => {
-					let context = resolve(&iri, base_url)
-						.map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
+					let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 					if validate_scoped_context == false && remote_contexts.contains(&context) { continue; }
-					if remote_contexts.len() > MAX_CONTEXTS { return Err(ContextOverflow.to_error(None)); }
+					if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
 					// 4)
 					let loaded_context = todo!();
 					result = process_context(&mut result, loaded_context, base_url, options, remote_contexts,
@@ -90,14 +89,13 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 				},
 				JsonOrReference::JsonObject(mut json) => {
 					if let Some(version) = json.get("@version") {
-						if version.as_number() != Some(Some(1.1)) { Err(InvalidVersionValue.to_error(None))? }
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(ProcessingModeConflict.to_error(None)); }
+						if version.as_number() != Some(Some(1.1)) { return Err(err!(InvalidVersionValue)) }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
 					}
 					if let Some(import_url) = json.get("@import") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(ProcessingModeConflict.to_error(None)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
 						if let Some(import_url) = import_url.as_string() {
-							let import = resolve(import_url, base_url)
-								.map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
+							let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 							let import = load_remote(import.as_str(), options, Some("http://www.w3.org/ns/json-ld#context".to_string()),
 								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
 									.map_err(|e| {
@@ -105,15 +103,14 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 											JsonLdError { code: LoadingRemoteContextFailed, ..e }
 										} else { e }
 									})?;
-							let import = import.document.to_parsed()
-								.map_err(|e| LoadingRemoteContextFailed.to_error(Some(Box::new(e))))?;
+							let import = import.document.to_parsed().map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
 							let import_context = import.get_attr("@context")
 								.and_then(|ctx| ctx.as_object())
-								.ok_or(InvalidRemoteContext.to_error(None))?;
-							if import_context.contains("@import") { return Err(InvalidContextEntry.to_error(None)); }
+								.ok_or(err!(InvalidRemoteContext))?;
+							if import_context.contains("@import") { return Err(err!(InvalidContextEntry)); }
 							todo!();
 						} else {
-							Err(InvalidImportValue.to_error(None))?
+							Err(err!(InvalidImportValue))?
 						}
 					}
 					if let Some(value) = json.get("@base") {
@@ -122,35 +119,35 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 								TypedJson::String(iri) => {
 									result.base_iri = Some(
 										resolve_with_str(&iri, result.base_iri)
-											.map_err(|e| InvalidBaseIRI.to_error(Some(Box::new(e))))?.to_string()
+											.map_err(|e| err!(InvalidBaseIRI, , e))?.to_string()
 									);
 								},
 								TypedJson::Null => result.base_iri = None,
-								_ => return Err(InvalidBaseIRI.with_description("not string or null", None))
+								_ => return Err(err!(InvalidBaseIRI, "not string or null"))
 							}
 						}
 					}
 					if let Some(value) = json.get("@vocab") {
 						result.vocabulary_mapping = match value.as_enum() {
 							TypedJson::String(iri) => expand_iri(active_context, &iri, options, true, false, None, None)
-								.map_err(|e| InvalidVocabMapping.to_error(Some(Box::new(e))))?,
+								.map_err(|e| err!(InvalidVocabMapping, , e))?,
 							TypedJson::Null => None,
-							_ => return Err(InvalidVocabMapping.with_description("not string or null", None))
+							_ => return Err(err!(InvalidVocabMapping, "not string or null"))
 						}
 					}
 					if let Some(value) = json.get("@language") {
 						result.default_language = process_language(value)?;
 					}
 					if let Some(value) = json.get("@direction") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(ProcessingModeConflict.to_error(None)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
 						result.default_base_direction = process_direction(value)?;
 					}
 					if json.contains("@propagate") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(ProcessingModeConflict.to_error(None)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
 					}
 
 					let mut defined = HashMap::<String, bool>::new();
-					let protected = json.get("@protected").map(|v| v.as_bool().ok_or(InvalidProtectedValue.to_error(None)))
+					let protected = json.get("@protected").map(|v| v.as_bool().ok_or(err!(InvalidProtectedValue)))
 						.unwrap_or(Ok(false))?;
 					for (key, _) in json.iter() {
 						match key {
@@ -166,7 +163,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 									let context = match context.as_enum() {
 										TypedJson::String(context) => JsonOrReference::Reference(Cow::Borrowed(context)),
 										TypedJson::Object(context) => JsonOrReference::JsonObject(Cow::Borrowed(context)),
-										_ => return Err(InvalidScopedContext.to_error(None))
+										_ => return Err(err!(InvalidScopedContext))
 									};
 									process_context(active_context, vec![Some(context)], base_url, options, remote_contexts,
 										true, true, false).await?;
@@ -178,7 +175,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 			}
 		} else {
 			if !override_protected && active_context.term_definitions.iter().any(|(_, def)| def.protected) {
-				return Err(InvalidContextNullification.to_error(None));
+				return Err(err!(InvalidContextNullification));
 			}
 			result = Context {
 				term_definitions: HashMap::<String, TermDefinition<T>>::new(),
@@ -209,25 +206,25 @@ pub fn create_term_definition<T, F, R>(
 {
 	if let Some(defined) = defined.get(term) {
 		if *defined { return Ok(()); }
-		else { return Err(CyclicIRIMapping.to_error(None)); }
+		else { return Err(err!(CyclicIRIMapping)); }
 	}
-	if term == "" { return Err(InvalidTermDefinition.to_error(None)); }
+	if term == "" { return Err(err!(InvalidTermDefinition)); }
 	let value_enum =  local_context.get(term).unwrap().as_enum();
 	if term == "@type" {
-		if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(KeywordRedefinition.to_error(None)); }
+		if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(KeywordRedefinition)); }
 		if let TypedJson::Object(value) = value_enum {
 			for (key, value) in value.iter() {
 				match key {
 					"@container" if value.as_string() == Some("@set") => (),
 					"@protected" => (),
-					_ => return Err(KeywordRedefinition.to_error(None))
+					_ => return Err(err!(KeywordRedefinition))
 				}
 			}
 		} else {
-			return Err(KeywordRedefinition.to_error(None));
+			return Err(err!(KeywordRedefinition));
 		}
 	} else {
-		if is_jsonld_keyword(term) { return Err(KeywordRedefinition.to_error(None)); }
+		if is_jsonld_keyword(term) { return Err(err!(KeywordRedefinition)); }
 		if looks_like_a_jsonld_keyword(term) { return Ok(()) }
 	}
 
@@ -256,7 +253,7 @@ pub fn create_term_definition<T, F, R>(
 				if term.starts_with(":") || term.ends_with(":") || term.contains("/") {
 					defined.insert(term.to_string(), true);
 					if definition.iri != expand_iri(active_context, id, options, false, false, Some(local_context), Some(defined))? {
-						return Err(InvalidIRIMapping.to_error(None));
+						return Err(err!(InvalidIRIMapping));
 					}
 				}
 				if !(term.contains(":") || term.contains("/")) && simple_term {
@@ -276,7 +273,7 @@ pub fn create_term_definition<T, F, R>(
 			iri.push_str(term);
 			definition.iri = Some(iri);
 		} else {
-			return Err(InvalidIRIMapping.to_error(None));
+			return Err(err!(InvalidIRIMapping));
 		}
 		Ok(())
 	};
@@ -290,31 +287,31 @@ pub fn create_term_definition<T, F, R>(
 					match id.as_enum() {
 						TypedJson::String(id) => process_id(Some(&id), false)?,
 						TypedJson::Null => {},
-						_ => process_id(None, false)?
+						_ => return Err(err!(InvalidIRIMapping))
 					}
 				}
 			}
 			if let Some(protected) = value.get("@protected") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
 				definition.protected = protected.as_bool().unwrap();
 			}
 			if let Some(t) = value.get("@type") {
-				let t = t.as_string().ok_or(InvalidTypeMapping.to_error(None))?;
+				let t = t.as_string().ok_or(err!(InvalidTypeMapping))?;
 				let t = expand_iri(active_context, t, options, false, false, Some(local_context), Some(defined))?;
 				if let Some(ref t) = t {
 					match t.as_str() {
 						"@json" | "@none" => {
-							if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
+							if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
 						},
 						"@id" | "@vocab" => {},
-						_ => return Err(InvalidTypeMapping.to_error(None))
+						_ => return Err(err!(InvalidTypeMapping))
 					}
 				}
 				definition.type_mapping = t;
 			}
 			if let Some(reverse) = value.get("@reverse") {
-				if value.contains("@id") || value.contains("@nest") { return Err(InvalidReverseProperty.to_error(None)); }
-				let reverse = reverse.as_string().ok_or(InvalidIRIMapping.to_error(None))?;
+				if value.contains("@id") || value.contains("@nest") { return Err(err!(InvalidReverseProperty)); }
+				let reverse = reverse.as_string().ok_or(err!(InvalidIRIMapping))?;
 				if looks_like_a_jsonld_keyword(reverse) { return Ok(()) }
 				definition.iri = expand_iri(active_context, reverse, options, false, false, Some(local_context), Some(defined))?;
 				if let Some(container) = value.get("@container") {
@@ -322,11 +319,11 @@ pub fn create_term_definition<T, F, R>(
 						TypedJson::String(container) => {
 							match container.as_str() {
 								"@set" | "@index" => Some(vec![container.to_owned()]),
-								_ => return Err(InvalidReverseProperty.to_error(None))
+								_ => return Err(err!(InvalidReverseProperty))
 							}
 						},
 						TypedJson::Null => None,
-						_ => return Err(InvalidReverseProperty.to_error(None))
+						_ => return Err(err!(InvalidReverseProperty))
 					};
 				}
 				definition.reverse_property = true;
@@ -338,37 +335,37 @@ pub fn create_term_definition<T, F, R>(
 				definition.container_mapping = Some(match container.as_enum() {
 					TypedJson::Array(container) => {
 						process_container(
-							container.iter().map(|v| v.as_string().map(|s| s.to_string()).ok_or(InvalidContainerMapping.to_error(None)))
+							container.iter().map(|v| v.as_string().map(|s| s.to_string()).ok_or(err!(InvalidContainerMapping)))
 								.collect::<Result<Vec<String>>>()?
 						)?
 					},
 					TypedJson::String(container) => process_container(vec![container.to_owned()])?,
-					_ => return Err(InvalidContainerMapping.to_error(None))
+					_ => return Err(err!(InvalidContainerMapping))
 				});
 				if let Some(ref container) = definition.container_mapping {
 					if container.iter().any(|s| s == "@type") {
 						match definition.type_mapping.as_ref().map(|s| s.as_str()) {
 							None => definition.type_mapping = Some("@id".to_string()),
 							Some("@id") | Some("vocab") => {},
-							_ => return Err(InvalidTypeMapping.to_error(None))
+							_ => return Err(err!(InvalidTypeMapping))
 						}
 					}
 				}
 			}
 			if let Some(index) = value.get("@index") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
 				if !definition.container_mapping.as_ref().map_or(false, |v| v.iter().any(|s| s == "@index")) {
-					return Err(InvalidTermDefinition.to_error(None));
+					return Err(err!(InvalidTermDefinition));
 				}
-				let index = index.as_string().ok_or(InvalidTermDefinition.to_error(None))?;
+				let index = index.as_string().ok_or(err!(InvalidTermDefinition))?;
 				definition.index_mapping = Some(index.to_string());
 			}
 			if let Some(context_raw) = value.get("@context") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
 				let context_owned = match context_raw.as_enum() {
 					TypedJson::String(context) => JsonOrReference::Reference(Cow::Owned(context.to_owned())),
 					TypedJson::Object(context) => JsonOrReference::JsonObject(Cow::Owned(context.to_owned())),
-					_ => return Err(InvalidScopedContext.to_error(None))
+					_ => return Err(err!(InvalidScopedContext))
 				};
 				definition.context = Some(context_owned);
 				definition.base_url = base_url.map(|v| v.to_string());
@@ -382,28 +379,28 @@ pub fn create_term_definition<T, F, R>(
 				}
 			}
 			if let Some(nest) = value.get("@nest") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
-				let nest = nest.as_string().ok_or(InvalidNestValue.to_error(None))?;
-				if is_jsonld_keyword(nest) && nest != "@nest" { return Err(InvalidNestValue.to_error(None)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
+				let nest = nest.as_string().ok_or(err!(InvalidNestValue))?;
+				if is_jsonld_keyword(nest) && nest != "@nest" { return Err(err!(InvalidNestValue)); }
 				definition.nest_value = Some(nest.to_string());
 			}
 			if let Some(prefix) = value.get("@prefix") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(InvalidTermDefinition.to_error(None)); }
-				if term.contains(":") || term.contains("/") { return Err(InvalidTermDefinition.to_error(None)); }
-				definition.prefix = prefix.as_bool().ok_or(InvalidPrefixValue.to_error(None))?;
+				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
+				if term.contains(":") || term.contains("/") { return Err(err!(InvalidTermDefinition)); }
+				definition.prefix = prefix.as_bool().ok_or(err!(InvalidPrefixValue))?;
 				if let Some(ref iri) = definition.iri {
-					if definition.prefix && is_jsonld_keyword(&iri) { return Err(InvalidTermDefinition.to_error(None)); }
+					if definition.prefix && is_jsonld_keyword(&iri) { return Err(err!(InvalidTermDefinition)); }
 				}
 			}
 			for (key, _) in value.iter() {
 				match key {
 					"@id" | "@reverse" | "@container" | "@context" | "@direction" | "@index" |
 						"@language" | "@nest" | "@prefix" | "@protected" | "@type" => {},
-					_ => return Err(InvalidTermDefinition.to_error(None))
+					_ => return Err(err!(InvalidTermDefinition))
 				}
 			}
 		},
-		_ => return Err(InvalidTermDefinition.to_error(None))
+		_ => return Err(err!(InvalidTermDefinition))
 	};
 	if let Some(previous_definition) = previous_definition {
 		if !override_protected && previous_definition.protected {
@@ -419,7 +416,7 @@ pub fn create_term_definition<T, F, R>(
 					definition.language_mapping != previous_definition.language_mapping ||
 					definition.nest_value != previous_definition.nest_value ||
 					definition.type_mapping != previous_definition.type_mapping {
-				return Err(ProtectedTermRedefinition.to_error(None));
+				return Err(err!(ProtectedTermRedefinition));
 			}
 			definition = previous_definition;
 		}

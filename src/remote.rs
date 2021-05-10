@@ -31,6 +31,6 @@ pub async fn load_remote<T, F, R>(iri: &str, options: &JsonLdOptions<T, F, R>,
 		#[cfg(feature = "reqwest-loader")]
 		return Ok(self::defaultdocumentloader::default_document_loader(iri, &load_document_options).await?);
 		#[cfg(not(feature = "reqwest-loader"))]
-		Err(crate::error::JsonLdErrorCode::LoadingDocumentFailed.with_description("Default Document Loader is not specified", None))
+		Err(err!(crate::error::JsonLdErrorCode::LoadingDocumentFailed, "Default Document Loader is not specified"))
 	}
 }

@@ -40,22 +40,19 @@ pub enum JsonLdErrorCode {
 	ProtectedTermRedefinition
 }
 
-impl JsonLdErrorCode {
-	pub fn to_error(self, e: Option<Box<dyn Error>>) -> JsonLdError {
-		JsonLdError {
-			code: self,
-			description: None,
-			cause: e
-		}
-	}
-
-	pub fn with_description<S: Into<String>>(self, d: S, e: Option<Box<dyn Error>>) -> JsonLdError {
-		JsonLdError {
-			code: self,
-			description: Some(d.into()),
-			cause: e
-		}
-	}
+macro_rules! err {
+	($code:expr) => {
+		crate::error::JsonLdError { code: $code, description: None, cause: None }
+	};
+	($code:expr, $desc:expr) => {
+		crate::error::JsonLdError { code: $code, description: Some($desc.into()), cause: None }
+	};
+	($code:expr, , $cause:expr) => {
+		crate::error::JsonLdError { code: $code, description: None, cause: Some(Box::new($cause)) }
+	};
+	($code:expr, $desc:expr, $cause:expr) => {
+		crate::error::JsonLdError { code: $code, description: Some($desc.into()), cause: Some(Box::new($cause)) }
+	};
 }
 
 impl Display for JsonLdErrorCode {

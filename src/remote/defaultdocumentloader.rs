@@ -22,8 +22,8 @@ lazy_static::lazy_static! {
 fn process_link_headers<'a>(response: &'a Response, url: &'a url::Url) -> impl Iterator<Item = Result<Link, JsonLdError>> + 'a {
 	response.headers().get_all(header::LINK).iter().flat_map(move |links| {
 		OneError::new(match links.to_str() {
-			Ok(links) => parse_link_header(links, url).map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e)))),
-			Err(e) => Err(LoadingDocumentFailed.to_error(Some(Box::new(e))))
+			Ok(links) => parse_link_header(links, url).map_err(|e| err!(LoadingDocumentFailed, , e)),
+			Err(e) => Err(err!(LoadingDocumentFailed, , e))
 		})
 	})
 }
@@ -47,25 +47,25 @@ pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocu
 	}
 	accept += ", application/json";
 
-	let url = url::Url::parse(url_str).map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
+	let url = url::Url::parse(url_str).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 
 	let intermediate_response = IRI_CLIENT.get(url.clone())
 		.header(header::ACCEPT, accept.clone())
 		.send().await
-		.map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
+		.map_err(|e| err!(LoadingDocumentFailed, , e))?;
 	let document_url = intermediate_response.url().to_string();
 	let response = if intermediate_response.status().is_redirection() {
 		REPRESENTATION_CLIENT.get(intermediate_response.url().clone())
 			.header(header::ACCEPT, accept)
 			.send().await
-			.map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?
+			.map_err(|e| err!(LoadingDocumentFailed, , e))?
 	} else { intermediate_response };
 
 	let mut context_url = None;
 	let content_type = response.headers().get(header::CONTENT_TYPE)
-		.map(|s| s.to_str().map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?
-			.parse::<mime::Mime>().map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))
-		).ok_or(LoadingDocumentFailed.with_description("Content-Type header is missing", None))??;
+		.map(|s| s.to_str().map_err(|e| err!(LoadingDocumentFailed, , e))?
+			.parse::<mime::Mime>().map_err(|e| err!(LoadingDocumentFailed, , e))
+		).ok_or(err!(LoadingDocumentFailed, "Content-Type header is missing"))??;
 
 	match content_type.essence_str() {
 		"application/ld+json" => {},
@@ -73,7 +73,7 @@ pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocu
 			for link in process_link_headers(&response, &url) {
 				let link = link?;
 				if link.rel == "http://www.w3.org/ns/json-ld#context" {
-					if context_url.is_some() { return Err(MultipleContextLinkHeaders.to_error(None)); }
+					if context_url.is_some() { return Err(err!(MultipleContextLinkHeaders)); }
 					context_url = Some(link.target);
 				}
 			}
@@ -91,11 +91,11 @@ pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocu
 					}
 				}
 			}
-			return Err(LoadingDocumentFailed.with_description("No JSON representation of resource found", None));
+			return Err(err!(LoadingDocumentFailed, "No JSON representation of resource found"));
 		}
 	}
-	let content_text = &response.text().await.map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
-	let content_json = T::from_str(content_text).map_err(|e| LoadingDocumentFailed.to_error(Some(Box::new(e))))?;
+	let content_text = &response.text().await.map_err(|e| err!(LoadingDocumentFailed, , e))?;
+	let content_json = T::from_str(content_text).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 
 	Ok(RemoteDocument {
 		content_type: content_type.essence_str().to_string(),

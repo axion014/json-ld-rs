@@ -71,7 +71,7 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(
 	if document_relative {
 		return Ok(Some(
 			resolve_with_str(value, active_context.base_iri.as_ref().map(|s| s.as_str()))
-				.map_err(|e| InvalidBaseIRI.to_error(Some(Box::new(e))))?.to_string()
+				.map_err(|e| err!(InvalidBaseIRI, , e))?.to_string()
 		));
 	}
 	Ok(Some(value.to_string()))

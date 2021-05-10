@@ -4,12 +4,14 @@ use std::borrow::Cow;
 
 use json_trait::{ForeignMutableJson, BuildableJson};
 
+#[macro_use]
+mod error;
+
 mod remote;
 mod context;
 mod compact;
 mod expand;
 mod util;
-mod error;
 
 use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
@@ -188,12 +190,12 @@ pub mod JsonLdProcessor {
 							TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(cow.wrap(obj))),
 							TypedJson::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
 							TypedJson::Null => None,
-							_ => return Err(InvalidContextEntry.to_error(None))
+							_ => return Err(err!(InvalidContextEntry))
 						})).collect::<Result<JsonLdContext<'a, T>>>(),
 						TypedJson::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
 						TypedJson::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
 						TypedJson::Null => Ok(vec![None]),
-						_ => Err(InvalidContextEntry.to_error(None))
+						_ => Err(err!(InvalidContextEntry))
 					})
 				}
 			}
