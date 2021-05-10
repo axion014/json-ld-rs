@@ -10,7 +10,7 @@ use async_recursion::async_recursion;
 
 use crate::{
 	Context, JsonLdContext, JsonOrReference,
-	JsonLdOptions, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
+	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, resolve_with_str, is_iri, as_compact_iri};
 use crate::error::{Result, JsonLdErrorCode::*, JsonLdError};
@@ -57,7 +57,7 @@ fn process_container(container: Vec<String>) -> Result<Vec<String>> {
 #[async_recursion(?Send)]
 pub async fn process_context<'a: 'b, 'b, T, F, R>(
 		active_context: &'b mut Context<'a, T>, local_context: JsonLdContext<'b, T>, base_url: Option<&'b Url>,
-		options: &JsonLdOptions<T, F, R>, remote_contexts: &HashSet<Url>, override_protected: bool,
+		options: &JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &HashSet<Url>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
@@ -90,10 +90,10 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 				JsonOrReference::JsonObject(mut json) => {
 					if let Some(version) = json.get("@version") {
 						if version.as_number() != Some(Some(1.1)) { return Err(err!(InvalidVersionValue)) }
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 					}
 					if let Some(import_url) = json.get("@import") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 						if let Some(import_url) = import_url.as_string() {
 							let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 							let import = load_remote(import.as_str(), options, Some("http://www.w3.org/ns/json-ld#context".to_string()),
@@ -129,7 +129,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 					}
 					if let Some(value) = json.get("@vocab") {
 						result.vocabulary_mapping = match value.as_enum() {
-							TypedJson::String(iri) => expand_iri(active_context, &iri, options, true, false, None, None)
+							TypedJson::String(iri) => expand_iri(active_context, &iri, options.inner, true, false, None, None)
 								.map_err(|e| err!(InvalidVocabMapping, , e))?,
 							TypedJson::Null => None,
 							_ => return Err(err!(InvalidVocabMapping, "not string or null"))
@@ -139,11 +139,11 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 						result.default_language = process_language(value)?;
 					}
 					if let Some(value) = json.get("@direction") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 						result.default_base_direction = process_direction(value)?;
 					}
 					if json.contains("@propagate") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(ProcessingModeConflict)); }
+						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 					}
 
 					let mut defined = HashMap::<String, bool>::new();
@@ -154,7 +154,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 							"@base" | "@direction" | "@import" | "@language" |
 								"@propagate" | "@protected" | "@version" | "@vocab" => {},
 							_ => {
-								create_term_definition(&mut result, &json, key, &mut defined, options,
+								create_term_definition(&mut result, &json, key, &mut defined, options.inner,
 									base_url, protected, override_protected, remote_contexts.clone())?;
 
 								// Scoped context validation; In the specification, this is done inside Create Term Definition,
