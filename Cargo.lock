@@ -89,6 +89,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea221b5284a47e40033bf9b66f35f984ec0ea2931eb03505246cd27a963f981b"
 
 [[package]]
+name = "elsa"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "848344296205756adc00ab3bec02658da0f72eaa1461474aa2d51d64311876a5"
+dependencies = [
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,6 +372,7 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "cc-traits",
+ "elsa",
  "http-link",
  "json",
  "json-trait",
@@ -377,7 +387,7 @@ dependencies = [
 [[package]]
 name = "json-trait"
 version = "0.1.0"
-source = "git+https://github.com/axion014/json-trait#3bcb37a483aca9a45cafb297ef49f054ac9f8dfd"
+source = "git+https://github.com/axion014/json-trait#03c44ef2f3fda8d7d870f1f750666aaba4e3cbf8"
 dependencies = [
  "cc-traits",
 ]
@@ -797,6 +807,12 @@ dependencies = [
  "libc",
  "winapi 0.3.9",
 ]
+
+[[package]]
+name = "stable_deref_trait"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "syn"

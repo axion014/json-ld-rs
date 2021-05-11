@@ -2,6 +2,8 @@ use std::future::Future;
 use std::collections::HashMap;
 use std::borrow::Cow;
 
+use elsa::FrozenMap;
+
 use json_trait::{ForeignMutableJson, BuildableJson};
 
 use maybe_owned::MaybeOwnedMut;
@@ -154,7 +156,7 @@ pub struct JsonLdOptionsImpl<'a, T, F, R> where
 	R: Future<Output = Result<RemoteDocument<T>>> + 'a
 {
 	inner: &'a JsonLdOptions<'a, T, F, R>,
-	loaded_contexts: MaybeOwnedMut<'a, HashMap<Url, LoadedContext<T>>>
+	loaded_contexts: MaybeOwnedMut<'a, FrozenMap<Url, Box<LoadedContext<T>>>>
 }
 
 impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a, T, F, R> where
@@ -165,7 +167,7 @@ impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a
 	fn from(value: &'a JsonLdOptions<'a, T, F, R>) -> Self {
 		JsonLdOptionsImpl {
 			inner: value,
-			loaded_contexts: MaybeOwnedMut::Owned(HashMap::new())
+			loaded_contexts: MaybeOwnedMut::Owned(FrozenMap::new())
 		}
 	}
 }
