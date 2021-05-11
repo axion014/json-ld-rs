@@ -247,7 +247,7 @@ pub mod JsonLdProcessor {
 
 		let base_url = context_base.map(|v| Url::parse(v).unwrap());
 		let mut active_context = process_context(&mut Context::default(), context, base_url.as_ref(),
-			&options, &HashSet::new(), false, true, true).await?;
+			&options, &mut HashSet::new(), false, true, true).await?;
 		active_context.base_iri = if options.inner.compact_to_relative { context_base.cloned() } else { options.inner.base.clone() };
 		compact_internal(active_context, None, TypedJson::Array(&expanded_input), options.inner.compact_arrays, options.inner.ordered)
 	}

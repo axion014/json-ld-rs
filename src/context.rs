@@ -3,13 +3,13 @@ use std::future::Future;
 use std::borrow::Cow;
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, TypedJson, Object, Array};
-use cc_traits::{Get, MapInsert};
+use cc_traits::{Get, MapInsert, Remove};
 
 use url::Url;
 use async_recursion::async_recursion;
 
 use crate::{
-	Context, JsonLdContext, JsonOrReference,
+	Context, JsonLdContext, JsonOrReference, LoadedContext,
 	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, resolve_with_str, is_iri, as_compact_iri};
@@ -57,7 +57,7 @@ fn process_container(container: Vec<String>) -> Result<Vec<String>> {
 #[async_recursion(?Send)]
 pub async fn process_context<'a: 'b, 'b, T, F, R>(
 		active_context: &'b mut Context<'a, T>, local_context: JsonLdContext<'b, T>, base_url: Option<&'b Url>,
-		options: &JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &HashSet<Url>, override_protected: bool,
+		options: &JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &mut HashSet<Url>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
@@ -82,10 +82,24 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 					let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 					if validate_scoped_context == false && remote_contexts.contains(&context) { continue; }
 					if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
-					// 4)
-					let loaded_context = todo!();
-					result = process_context(&mut result, loaded_context, base_url, options, remote_contexts,
-						false, true, validate_scoped_context).await?;
+					remote_contexts.insert(context.clone());
+					let loaded_context = if let Some(loaded_context) = options.loaded_contexts.get(&context) {
+						loaded_context
+					} else {
+						let context_document = load_remote(context.as_str(), options, Some("http://www.w3.org/ns/json-ld#context".to_string()),
+								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
+							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+						let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+						let loaded_context = context_document.document.to_parsed()
+							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?
+							.as_object_mut()
+							.and_then(|obj| obj.remove("@context"))
+							.and_then(|ctx| ctx.take_object())
+							.ok_or(err!(InvalidRemoteContext))?;
+						options.loaded_contexts.insert(context, Box::new(LoadedContext { context: loaded_context, base_url }))
+					};
+					result = process_context(&mut result, vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&loaded_context.context)))],
+						Some(&loaded_context.base_url), options, remote_contexts, false, true, validate_scoped_context).await?;
 				},
 				JsonOrReference::JsonObject(mut json) => {
 					if let Some(version) = json.get("@version") {
