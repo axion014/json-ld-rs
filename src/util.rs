@@ -27,6 +27,10 @@ pub fn is_iri(value: &str) -> bool {
 	Url::parse(value).is_ok()
 }
 
+pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
+	value[1..].find(":").map(|index| (&value[..index], &value[(index + 1)..]))
+}
+
 pub trait MapCow<'a: 'b, 'b, T: ToOwned + 'a, U> {
 	fn map<'c, C: MapCowCallback<'b, 'c>>(&self, value: &'c T, cow: C) -> U where 'a: 'c;
 }

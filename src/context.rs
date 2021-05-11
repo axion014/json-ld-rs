@@ -122,7 +122,11 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 								.and_then(|ctx| ctx.as_object())
 								.ok_or(err!(InvalidRemoteContext))?;
 							if import_context.contains("@import") { return Err(err!(InvalidContextEntry)); }
-							todo!();
+							for (key, value) in import_context.iter() {
+								if json.get(key).is_none() {
+									json.to_mut().insert(key.to_string(), value.clone());
+								}
+							}
 						} else {
 							Err(err!(InvalidImportValue))?
 						}
@@ -271,15 +275,29 @@ pub fn create_term_definition<T, F, R>(
 					}
 				}
 				if !(term.contains(":") || term.contains("/")) && simple_term {
-
+					if let Some(ref iri) = definition.iri {
+						if iri.starts_with("_") || iri.ends_with(&[':', '/', '?', '#', '[', ']', '@'] as &[_]) {
+							definition.prefix = true;
+						}
+					}
 				}
 				return Ok(());
 			}
 		}
-		if term[1..].contains(":") {
-
+		if let Some((prefix, suffix)) = as_compact_iri(term) {
+			if local_context.contains(prefix) {
+				create_term_definition(active_context, local_context, prefix, defined, options,
+					None, false, false)?;
+			}
+			if let Some(prefix_definition) = active_context.term_definitions.get(prefix) {
+				// FIXME: not sure what to do when prefix_definition.iri is None
+				definition.iri = Some(prefix_definition.iri.clone().unwrap() + suffix);
+			} else {
+				definition.iri = Some(term.to_string());
+			}
 		} else if term.contains("/") {
 			definition.iri = expand_iri(active_context, term, options, false, false, Some(local_context), Some(defined))?;
+			if !definition.iri.as_ref().map_or(false, |s| is_iri(s)) { return Err(err!(InvalidIRIMapping)); }
 		} else if term == "@type" {
 			definition.iri = Some("@type".to_string());
 		} else if let Some(ref vocabulary_mapping) = active_context.vocabulary_mapping {
@@ -304,6 +322,8 @@ pub fn create_term_definition<T, F, R>(
 						_ => return Err(err!(InvalidIRIMapping))
 					}
 				}
+			} else {
+				process_id(None, false)?;
 			}
 			if let Some(protected) = value.get("@protected") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }

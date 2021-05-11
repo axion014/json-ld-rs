@@ -6,7 +6,7 @@ use cc_traits::{Collection, Get};
 
 use crate::{Context, JsonLdOptions, LoadDocumentOptions, RemoteDocument};
 use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
-use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, resolve_with_str};
+use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, resolve_with_str, as_compact_iri};
 use crate::context::create_term_definition;
 
 pub fn expand_iri<'a, 'b: 'a, T, F, R>(
@@ -37,10 +37,7 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(
 			return Ok(definition.iri.to_owned());
 		}
 	}
-	if value[1..].contains(":") {
-		let mut iter = value.splitn(2, |s| s == ':');
-		let prefix = iter.next().unwrap();
-		let suffix = iter.next().unwrap();
+	if let Some((prefix, suffix)) = as_compact_iri(value) {
 		if prefix == "_" || suffix.starts_with("//") {
 			return Ok(Some(value.to_string()));
 		}
