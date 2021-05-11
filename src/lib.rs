@@ -143,13 +143,18 @@ pub struct JsonLdOptions<'a, T, F, R> where
 	pub use_rdf_type: bool
 }
 
+struct LoadedContext<T: ForeignMutableJson + BuildableJson> {
+	context: T::Object,
+	base_url: Url
+}
+
 pub struct JsonLdOptionsImpl<'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
 	R: Future<Output = Result<RemoteDocument<T>>> + 'a
 {
 	inner: &'a JsonLdOptions<'a, T, F, R>,
-	loaded_contexts: MaybeOwnedMut<'a, HashMap<Url, Option<T::Object>>>
+	loaded_contexts: MaybeOwnedMut<'a, HashMap<Url, LoadedContext<T>>>
 }
 
 impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a, T, F, R> where
