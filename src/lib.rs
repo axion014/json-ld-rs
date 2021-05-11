@@ -73,7 +73,7 @@ struct TermDefinition<'a, T> where
 	prefix: bool,
 	protected: bool,
 	reverse_property: bool,
-	base_url: Option<String>,
+	base_url: Option<Url>,
 	context: Option<JsonOrReference<'a, T>>,
 	container_mapping: Option<Vec<String>>,
 	direction_mapping: Option<Direction>,
@@ -89,8 +89,8 @@ pub struct Context<'a, T> where
 	T::Object: Clone
 {
 	term_definitions: HashMap<String, TermDefinition<'a, T>>,
-	base_iri: Option<String>,
-	original_base_url: Option<String>,
+	base_iri: Option<Url>,
+	original_base_url: Option<Url>,
 	inverse_context: Option<HashMap<String, T>>,
 	vocabulary_mapping: Option<String>,
 	default_language: Option<String>,
@@ -179,7 +179,7 @@ pub mod JsonLdProcessor {
 	use maybe_owned::MaybeOwnedMut;
 
 	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context};
-	use crate::error::{Result, JsonLdErrorCode::InvalidContextEntry};
+	use crate::error::{Result, JsonLdErrorCode::{InvalidContextEntry, InvalidBaseIRI}};
 	use crate::remote::{self, LoadDocumentOptions};
 	use crate::context::process_context;
 	use crate::compact::compact_internal;
@@ -211,9 +211,9 @@ pub mod JsonLdProcessor {
 		let expanded_input = expand(input, expand_options).await?;
 
 		let context_base = if let JsonLdInput::RemoteDocument(ref doc) = input {
-			Some(&doc.document_url)
+			Some(Url::parse(&doc.document_url).map_err(|e| err!(InvalidBaseIRI, , e))?)
 		} else {
-			options.inner.base.as_ref()
+			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
 		};
 
 		// If context is a map having an @context entry, set context to that entry's value
@@ -245,10 +245,13 @@ pub mod JsonLdProcessor {
 				}).and_then(map_cow(MapContext)).unwrap_or(Ok(contexts))
 		})?;
 
-		let base_url = context_base.map(|v| Url::parse(v).unwrap());
-		let mut active_context = process_context(&mut Context::default(), context, base_url.as_ref(),
+		let mut active_context = process_context(&mut Context::default(), context, context_base.as_ref(),
 			&options, &mut HashSet::new(), false, true, true).await?;
-		active_context.base_iri = if options.inner.compact_to_relative { context_base.cloned() } else { options.inner.base.clone() };
+		active_context.base_iri = if options.inner.compact_to_relative {
+			context_base
+		} else {
+			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
+		};
 		compact_internal(active_context, None, TypedJson::Array(&expanded_input), options.inner.compact_arrays, options.inner.ordered)
 	}
 

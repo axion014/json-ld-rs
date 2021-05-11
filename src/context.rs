@@ -135,10 +135,8 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 						if remote_contexts.is_empty() {
 							match value.as_enum() {
 								TypedJson::String(iri) => {
-									result.base_iri = Some(
-										resolve_with_str(&iri, result.base_iri)
-											.map_err(|e| err!(InvalidBaseIRI, , e))?.to_string()
-									);
+									result.base_iri = Some(resolve(&iri, result.base_iri.as_ref())
+										.map_err(|e| err!(InvalidBaseIRI, , e))?);
 								},
 								TypedJson::Null => result.base_iri = None,
 								_ => return Err(err!(InvalidBaseIRI, "not string or null"))
@@ -397,7 +395,7 @@ pub fn create_term_definition<T, F, R>(
 					_ => return Err(err!(InvalidScopedContext))
 				};
 				definition.context = Some(context_owned);
-				definition.base_url = base_url.map(|v| v.to_string());
+				definition.base_url = base_url.cloned();
 			}
 			if !value.contains("@type") {
 				if let Some(language) = value.get("@language") {
