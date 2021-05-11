@@ -19,7 +19,7 @@ pub fn resolve(r: &str, base: Option<&Url>) -> Result<Url, ParseError> {
 	Url::options().base_url(base).parse(r)
 }
 
-pub fn resolve_with_str<T: std::borrow::Borrow<str>>(r: &str, base: Option<T>) -> Result<Url, ParseError> {
+pub fn resolve_with_str<T: Borrow<str>>(r: &str, base: Option<T>) -> Result<Url, ParseError> {
 	resolve(r, base.map(|base| Url::parse(base.borrow())).transpose()?.as_ref())
 }
 
@@ -32,7 +32,7 @@ pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
 }
 
 pub trait MapCow<'a: 'b, 'b, T: ToOwned + 'a, U> {
-	fn map<'c, C: MapCowCallback<'b, 'c>>(&self, value: &'c T, cow: C) -> U where 'a: 'c;
+	fn map<'c>(&self, value: &'c T, cow: impl MapCowCallback<'b, 'c>) -> U where 'a: 'c;
 }
 
 pub trait MapCowCallback<'a, 'b> {

@@ -17,7 +17,7 @@ use crate::error::{Result, JsonLdErrorCode::*, JsonLdError};
 use crate::remote::{load_remote, LoadDocumentOptions};
 use crate::expand::expand_iri;
 
-const MAX_CONTEXTS: usize = 1000; // The number's placeholder
+const MAX_CONTEXTS: usize = 25; // The number's placeholder
 
 fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 	Ok(match value.as_enum() {
@@ -173,7 +173,7 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 								"@propagate" | "@protected" | "@version" | "@vocab" => {},
 							_ => {
 								create_term_definition(&mut result, &json, key, &mut defined, options.inner,
-									base_url, protected, override_protected, remote_contexts.clone())?;
+									base_url, protected, override_protected)?;
 
 								// Scoped context validation; In the specification, this is done inside Create Term Definition,
 								// but doing it here is preferred, because minimizing async part of the code help keep things simple
@@ -196,18 +196,14 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 				return Err(err!(InvalidContextNullification));
 			}
 			result = Context {
-				term_definitions: HashMap::<String, TermDefinition<T>>::new(),
 				base_iri: active_context.original_base_url.clone(),
 				original_base_url: active_context.original_base_url.clone(),
-				inverse_context: None,
-				vocabulary_mapping: None,
-				default_language: None,
-				default_base_direction: None,
 				previous_context: if !propagate {
 					Some(Box::new(result))
 				} else {
 					None
-				}
+				},
+				..Context::default()
 			};
 		}
 	}
@@ -215,9 +211,8 @@ pub async fn process_context<'a: 'b, 'b, T, F, R>(
 }
 
 pub fn create_term_definition<T, F, R>(
-		active_context: &mut Context<'_, T>, local_context: &T::Object, term: &str,
-		defined: &mut HashMap<String, bool>, options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>,
-		protected: bool, override_protected: bool, remote_contexts: HashSet<Url>) -> Result<()> where
+		active_context: &mut Context<'_, T>, local_context: &T::Object, term: &str, defined: &mut HashMap<String, bool>,
+		options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>

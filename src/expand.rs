@@ -23,7 +23,7 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(
 		if let Some(ref mut defined) = defined {
 			if local_context.contains(value) && defined.get(value).map_or(false, |v| !v) {
 				create_term_definition(active_context, local_context, value, defined, options,
-					None, false, false, HashSet::new())?;
+					None, false, false)?;
 			}
 		}
 	}
@@ -45,7 +45,7 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(
 			if let Some(defined) = defined {
 				if local_context.contains(prefix) && defined.get(prefix).map_or(false, |v| !v) {
 					create_term_definition(active_context, local_context, prefix, defined, options,
-						None, false, false, HashSet::new())?;
+						None, false, false)?;
 				}
 			}
 		}
