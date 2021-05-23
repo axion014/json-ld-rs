@@ -11,8 +11,9 @@ use maybe_owned::MaybeOwnedMut;
 use url::Url;
 
 #[macro_use]
-mod error;
+mod macros;
 
+mod error;
 mod remote;
 mod context;
 mod compact;
