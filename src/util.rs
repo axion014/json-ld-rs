@@ -1,10 +1,13 @@
 use std::borrow::{Borrow, Cow};
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object};
+use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object, Array, typed_json::*};
 
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Remove};
 
 use url::{Url, ParseError};
+
+use crate::{JsonLdContext, JsonOrReference};
+use crate::error::{JsonLdError, JsonLdErrorCode::InvalidContextEntry};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
 	value.starts_with('@') && value.len() > 1 && match &value[1..] {
@@ -76,32 +79,34 @@ pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, 
 	}
 }
 
-pub trait MapCow<'a: 'b, 'b, T: ToOwned + 'a, U> {
-	fn map<'c>(&self, value: &'c T, cow: impl MapCowCallback<'b, 'c>) -> U where 'a: 'c;
-}
-
-pub trait MapCowCallback<'a, 'b> {
-	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> where 'a: 'c;
-}
-
-struct Borrowed;
-impl <'a, 'b: 'a> MapCowCallback<'a, 'b> for Borrowed {
-	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> where 'a: 'c {
-		Cow::Borrowed(value)
-	}
-}
-
-struct Owned;
-impl <'b> MapCowCallback<'_, 'b> for Owned {
-	fn wrap<'c, I: ToOwned + 'c + ?Sized>(&self, value: &'b I) -> Cow<'c, I> {
-		Cow::Owned(value.to_owned())
-	}
-}
-
-pub fn map_cow<'a: 'b, 'b, T: ToOwned + 'a, U>(f: impl MapCow<'a, 'b, T, U>) -> impl Fn(&Cow<'b, T>) -> U {
-	move |value| match value {
-		Cow::Borrowed(value) => f.map(value, Borrowed),
-		Cow::Owned(value) => f.map(value.borrow(), Owned)
+pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -> Result<JsonLdContext<'a, T>, JsonLdError> {
+	match ctx {
+		Cow::Owned(ctx) => match ctx.into_enum() {
+			Owned::Array(ctx) => ctx.into_iter().map(|value| Ok(match value.into_enum() {
+				// Only one level of recursion, I think
+				Owned::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Owned(obj))),
+				Owned::String(reference) => Some(JsonOrReference::Reference(Cow::Owned(reference))),
+				Owned::Null => None,
+				_ => return Err(err!(InvalidContextEntry))
+			})).collect::<Result<JsonLdContext<'a, T>, JsonLdError>>(),
+			Owned::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Owned(ctx)))]),
+			Owned::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Owned(reference)))]),
+			Owned::Null => Ok(vec![None]),
+			_ => Err(err!(InvalidContextEntry))
+		},
+		Cow::Borrowed(ctx) => match ctx.as_enum() {
+			Borrowed::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
+				// Only one level of recursion, I think
+				Borrowed::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Borrowed(obj))),
+				Borrowed::String(reference) => Some(JsonOrReference::Reference(Cow::Borrowed(reference))),
+				Borrowed::Null => None,
+				_ => return Err(err!(InvalidContextEntry))
+			})).collect::<Result<JsonLdContext<'a, T>, JsonLdError>>(),
+			Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(ctx)))]),
+			Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(reference)))]),
+			Borrowed::Null => Ok(vec![None]),
+			_ => Err(err!(InvalidContextEntry))
+		}
 	}
 }
 

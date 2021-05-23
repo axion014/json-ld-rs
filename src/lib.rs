@@ -242,14 +242,14 @@ pub mod JsonLdProcessor {
 	use maybe_owned::MaybeOwnedMut;
 
 	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context};
-	use crate::error::{Result, JsonLdErrorCode::{InvalidContextEntry, InvalidBaseIRI}};
+	use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
 	use crate::remote::{self, LoadDocumentOptions};
 	use crate::context::process_context;
 	use crate::compact::compact_internal;
-	use crate::util::{map_cow, MapCow, MapCowCallback};
+	use crate::util::map_context;
 
-	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Array};
-	use cc_traits::Get;
+	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson};
+	use cc_traits::{Get, Remove};
 	use url::Url;
 
 	pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
@@ -282,32 +282,18 @@ pub mod JsonLdProcessor {
 		};
 
 		// If context is a map having an @context entry, set context to that entry's value
-		let context = ctx.map_or(Ok(vec![None]), |contexts| {
-			struct MapContext;
-			impl <'a, T> MapCow<'static, 'a, T::Object, Option<Result<JsonLdContext<'a, T>>>> for MapContext where
-				T: ForeignMutableJson + BuildableJson
-			{
-				fn map<'b>(&self, json: &'b T::Object, cow: impl MapCowCallback<'a, 'b>) -> Option<Result<JsonLdContext<'a, T>>> {
-					json.get("@context").map(|ctx| match ctx.as_enum() {
-						Borrowed::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
-							// Only one level of recursion, I think
-							Borrowed::Object(obj) => Some(JsonOrReference::JsonObject(cow.wrap(obj))),
-							Borrowed::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
-							Borrowed::Null => None,
-							_ => return Err(err!(InvalidContextEntry))
-						})).collect::<Result<JsonLdContext<'a, T>>>(),
-						Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
-						Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
-						Borrowed::Null => Ok(vec![None]),
-						_ => Err(err!(InvalidContextEntry))
-					})
+		let context = ctx.map_or(Ok(vec![None]), |mut contexts| {
+			if contexts.len() == 1 {
+				match contexts.remove(0).unwrap() {
+					JsonOrReference::JsonObject(mut json) => match json {
+						Cow::Owned(ref mut json) => json.remove("@context").map(|json| map_context(Cow::Owned(json))),
+						Cow::Borrowed(json) => json.get("@context").map(|json| map_context(Cow::Borrowed(json)))
+					}.unwrap_or(Ok(vec![Some(JsonOrReference::JsonObject(json))])),
+					JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri))])
 				}
+			} else {
+				Ok(contexts)
 			}
-			(if contexts.len() == 1 { contexts[0].as_ref() } else { None })
-				.and_then(|ctx| match ctx {
-					JsonOrReference::JsonObject(json) => Some(json),
-					_ => None
-				}).and_then(map_cow(MapContext)).unwrap_or(Ok(contexts))
 		})?;
 
 		let mut active_context = process_context(&Context::default(), context, context_base.as_ref(),
