@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, Cow};
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Array};
+use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object};
 
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Remove};
 
@@ -48,7 +48,7 @@ pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<
 }
 
 pub fn is_graph_object<T: ForeignJson>(value: &T::Object) -> bool {
-	todo!()
+	value.contains("@graph") && value.iter().filter(|(key, _)| key != &"@id" && key != &"@index").count() == 1
 }
 
 pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, key: &str, value: T, as_array: bool) {
