@@ -1,8 +1,9 @@
 use std::future::Future;
-use std::collections::HashMap;
-use std::borrow::Cow;
+use std::collections::{HashMap, BTreeMap, BTreeSet};
+use std::borrow::{Borrow, Cow};
 
 use elsa::FrozenMap;
+use once_cell::unsync::OnceCell;
 
 use json_trait::{ForeignMutableJson, BuildableJson};
 
@@ -62,7 +63,18 @@ type JsonLdContext<'a, T> = Vec<Option<JsonOrReference<'a, T>>>;
 #[derive(Clone, Eq, PartialEq)]
 pub enum Direction {
 	LTR,
-	RTL
+	RTL,
+	None
+}
+
+impl AsRef<str> for Direction {
+	fn as_ref(&self) -> &str {
+		match self {
+			Direction::LTR => "_ltr",
+			Direction::RTL => "_rtl",
+			Direction::None => "@none"
+		}
+	}
 }
 
 #[derive(Clone)]
@@ -76,7 +88,7 @@ struct TermDefinition<'a, T> where
 	reverse_property: bool,
 	base_url: Option<Url>,
 	context: Option<JsonOrReference<'a, T>>,
-	container_mapping: Option<Vec<String>>,
+	container_mapping: Option<BTreeSet<String>>,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
 	language_mapping: Option<String>,
@@ -84,15 +96,37 @@ struct TermDefinition<'a, T> where
 	type_mapping: Option<String>
 }
 
+#[derive(Clone, PartialEq, Eq, Ord)]
+struct TermDefinitionKey(String);
+
+impl PartialOrd for TermDefinitionKey {
+	fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
+		let cmp_len = self.0.len().cmp(&rhs.0.len());
+		Some(if cmp_len == std::cmp::Ordering::Equal { self.0.cmp(&rhs.0) } else { cmp_len })
+	}
+}
+
+impl From<String> for TermDefinitionKey {
+	fn from(value: String) -> Self {
+		TermDefinitionKey(value)
+	}
+}
+
+impl Borrow<str> for TermDefinitionKey {
+	fn borrow(&self) -> &str {
+		self.0.as_str()
+	}
+}
+
 #[derive(Clone)]
 pub struct Context<'a, T> where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
-	term_definitions: HashMap<String, TermDefinition<'a, T>>,
+	term_definitions: BTreeMap<TermDefinitionKey, TermDefinition<'a, T>>,
 	base_iri: Option<Url>,
 	original_base_url: Option<Url>,
-	inverse_context: Option<HashMap<String, T>>,
+	inverse_context: OnceCell<HashMap<String, T>>,
 	vocabulary_mapping: Option<String>,
 	default_language: Option<String>,
 	default_base_direction: Option<Direction>,
@@ -105,10 +139,10 @@ impl <T> Default for Context<'_, T> where
 {
 	fn default() -> Self {
 		Context {
-			term_definitions: HashMap::<String, TermDefinition<T>>::new(),
+			term_definitions: BTreeMap::<TermDefinitionKey, TermDefinition<T>>::new(),
 			base_iri: None,
 			original_base_url: None,
-			inverse_context: None,
+			inverse_context: OnceCell::new(),
 			vocabulary_mapping: None,
 			default_language: None,
 			default_base_direction: None,
@@ -117,7 +151,7 @@ impl <T> Default for Context<'_, T> where
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum JsonLdProcessingMode {
 	JsonLd1_1,
 	JsonLd1_0
@@ -141,9 +175,33 @@ pub struct JsonLdOptions<'a, T, F, R> where
 	pub ordered: bool,
 	pub processing_mode: JsonLdProcessingMode,
 	pub produce_generalized_rdf: bool,
-	pub rdf_direction: Option<Direction>,
+	pub rdf_direction: Option<String>,
 	pub use_native_types: bool,
 	pub use_rdf_type: bool
+}
+
+impl <'a, T, F, R> Default for JsonLdOptions<'a, T, F, R> where
+	T: ForeignMutableJson + BuildableJson,
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
+	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+{
+	fn default() -> Self {
+		JsonLdOptions {
+			base: None,
+			compact_arrays: true,
+			compact_to_relative: true,
+			document_loader: None,
+			expand_context: None,
+			extract_all_scripts: false,
+			frame_expansion: false,
+			ordered: false,
+			processing_mode: JsonLdProcessingMode::JsonLd1_1,
+			produce_generalized_rdf: true,
+			rdf_direction: None,
+			use_native_types: false,
+			use_rdf_type: false
+		}
+	}
 }
 
 struct LoadedContext<T: ForeignMutableJson + BuildableJson> {
@@ -186,7 +244,7 @@ pub mod JsonLdProcessor {
 	use crate::compact::compact_internal;
 	use crate::util::{map_cow, MapCow, MapCowCallback};
 
-	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, TypedJson, Array};
+	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Array};
 	use cc_traits::Get;
 	use url::Url;
 
@@ -225,16 +283,16 @@ pub mod JsonLdProcessor {
 			{
 				fn map<'b>(&self, json: &'b T::Object, cow: impl MapCowCallback<'a, 'b>) -> Option<Result<JsonLdContext<'a, T>>> {
 					json.get("@context").map(|ctx| match ctx.as_enum() {
-						TypedJson::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
+						Borrowed::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
 							// Only one level of recursion, I think
-							TypedJson::Object(obj) => Some(JsonOrReference::JsonObject(cow.wrap(obj))),
-							TypedJson::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
-							TypedJson::Null => None,
+							Borrowed::Object(obj) => Some(JsonOrReference::JsonObject(cow.wrap(obj))),
+							Borrowed::String(reference) => Some(JsonOrReference::Reference(cow.wrap(reference))),
+							Borrowed::Null => None,
 							_ => return Err(err!(InvalidContextEntry))
 						})).collect::<Result<JsonLdContext<'a, T>>>(),
-						TypedJson::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
-						TypedJson::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
-						TypedJson::Null => Ok(vec![None]),
+						Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(cow.wrap(ctx)))]),
+						Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(cow.wrap(reference)))]),
+						Borrowed::Null => Ok(vec![None]),
 						_ => Err(err!(InvalidContextEntry))
 					})
 				}
@@ -246,14 +304,14 @@ pub mod JsonLdProcessor {
 				}).and_then(map_cow(MapContext)).unwrap_or(Ok(contexts))
 		})?;
 
-		let mut active_context = process_context(&mut Context::default(), context, context_base.as_ref(),
+		let mut active_context = process_context(&Context::default(), context, context_base.as_ref(),
 			&options, &mut HashSet::new(), false, true, true).await?;
 		active_context.base_iri = if options.inner.compact_to_relative {
 			context_base
 		} else {
 			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
 		};
-		compact_internal(active_context, None, TypedJson::Array(&expanded_input), options.inner.compact_arrays, options.inner.ordered)
+		compact_internal(&mut active_context, None, expanded_input.into(), &options, options.inner.compact_arrays, options.inner.ordered).await
 	}
 
 	pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) ->

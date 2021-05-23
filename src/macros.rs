@@ -12,3 +12,31 @@ macro_rules! err {
 		crate::error::JsonLdError { code: $code, description: Some($desc.into()), cause: Some(Box::new($cause)) }
 	};
 }
+
+macro_rules! expand_iri {
+	($active_context:expr,$value:expr) => {
+		expand_iri!($active_context, $value, false)
+	};
+	($active_context:expr,$value:expr,$document_relative:expr) => {
+		expand_iri!($active_context, $value, $document_relative, false)
+	};
+	($active_context:expr,$value:expr,$document_relative:expr,$vocab:expr) => {
+		// FIXME: Waiting for Never type to arrive
+		expand_iri::<_, fn(&str, &Option<LoadDocumentOptions>) -> _, std::future::Pending<_>>(
+			crate::expand::IRIExpansionArguments::Normal($active_context), $value, $document_relative, $vocab)
+	};
+}
+
+macro_rules! process_context_iri {
+	($active_context:expr,$value:expr,$local_context:expr,$defined:expr,$options:expr) => {
+		process_context_iri!($active_context, $value, false, false, $local_context, $defined, $options)
+	};
+	($active_context:expr,$value:expr,$document_relative:expr,$vocab:expr,$local_context:expr,$defined:expr,$options:expr) => {
+		expand_iri(crate::expand::IRIExpansionArguments::DefineTerms {
+			active_context: $active_context,
+			local_context: $local_context,
+			defined: $defined,
+			options: $options
+		}, $value, $document_relative, $vocab)
+	};
+}
