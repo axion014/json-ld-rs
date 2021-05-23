@@ -30,6 +30,7 @@ pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
 	Reference(Cow<'a, str>),
 }
 
+#[derive(Clone)]
 pub enum Document<T: ForeignMutableJson + BuildableJson> {
 	ParsedJson(T),
 	RawJson(String)
@@ -44,6 +45,7 @@ impl <T: ForeignMutableJson + BuildableJson> Document<T> {
 	}
 }
 
+#[derive(Clone)]
 pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 	pub content_type: String,
 	pub context_url: Option<String>,
@@ -52,6 +54,7 @@ pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 	pub profile: Option<String>
 }
 
+#[derive(Clone)]
 pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 	JsonObject(T::Object),
 	Reference(String),
@@ -234,6 +237,7 @@ impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a
 pub mod JsonLdProcessor {
 	use std::future::Future;
 	use std::collections::HashSet;
+	use std::borrow::Cow;
 
 	use maybe_owned::MaybeOwnedMut;
 
@@ -248,16 +252,18 @@ pub mod JsonLdProcessor {
 	use cc_traits::Get;
 	use url::Url;
 
-	pub async fn compact<'a, T, F, R>(input: &mut JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
+	pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
 			options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T> where
 		T: ForeignMutableJson + BuildableJson,
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
 		R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
 	{
 		let mut options = options.into();
-		if let JsonLdInput::Reference(iri) = input {
-			*input = JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?);
-		}
+		let input = if let JsonLdInput::Reference(iri) = input {
+			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?))
+		} else {
+			Cow::Borrowed(input)
+		};
 
 		// 4)
 		let expand_options = JsonLdOptionsImpl {
@@ -267,9 +273,9 @@ pub mod JsonLdProcessor {
 			},
 			loaded_contexts: MaybeOwnedMut::Borrowed(options.loaded_contexts.as_mut())
 		};
-		let expanded_input = expand(input, expand_options).await?;
+		let expanded_input = expand(&input, expand_options).await?;
 
-		let context_base = if let JsonLdInput::RemoteDocument(ref doc) = input {
+		let context_base = if let JsonLdInput::RemoteDocument(ref doc) = *input {
 			Some(Url::parse(&doc.document_url).map_err(|e| err!(InvalidBaseIRI, , e))?)
 		} else {
 			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
