@@ -39,8 +39,8 @@ pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
 }
 
 pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<D>) -> String {
-	let language = language.map(|language| language.to_ascii_lowercase()).unwrap_or_else(|| "".to_string());
-	let direction = direction.as_ref().map(|direction| direction.as_ref()).unwrap_or("");
+	let language = language.map_or_else(|| "".to_string(), |language| language.to_ascii_lowercase());
+	let direction = direction.as_ref().map_or("", |direction| direction.as_ref());
 	if direction == "@none" && language != "" {
 		language
 	} else if (language == "@null"|| language == "@none") && direction != "" {

@@ -166,8 +166,7 @@ pub async fn process_context<'a, 'b, T, F, R>(
 					}
 
 					let mut defined = HashMap::<String, bool>::new();
-					let protected = json.get("@protected").map(|v| v.as_bool().ok_or(err!(InvalidProtectedValue)))
-						.unwrap_or(Ok(false))?;
+					let protected = json.get("@protected").map_or(Ok(false), |v| v.as_bool().ok_or(err!(InvalidProtectedValue)))?;
 					for (key, _) in json.iter() {
 						match key {
 							"@base" | "@direction" | "@import" | "@language" |
