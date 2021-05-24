@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object};
 use cc_traits::{Get, GetMut, Len, PushBack, Remove, MapInsert};
 
+use maybe_owned::MaybeOwned;
+
 use async_recursion::async_recursion;
 
 use if_chain::if_chain;
@@ -18,22 +20,21 @@ use crate::util::{resolve, make_lang_dir, is_graph_object, add_value};
 
 #[async_recursion(?Send)]
 pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>,
-		element: T, options: &'b JsonLdOptionsImpl<'a, T, F, R>, compact_arrays: bool, ordered: bool) -> Result<T> where
+		element: T, options: &'b JsonLdOptionsImpl<'a, T, F, R>) -> Result<T> where
 	T: ForeignMutableJson + BuildableJson,
-	T::Object: Clone,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	match element.into_enum() {
 		Owned::Array(array) => {
 			let mut result = T::empty_array();
 			for item in array.into_iter() {
-				let compacted_item = compact_internal(active_context, active_property, item, options, compact_arrays, ordered).await?;
+				let compacted_item = compact_internal(active_context, active_property, item, options).await?;
 				if !compacted_item.is_null() {
 					result.push_back(compacted_item);
 				}
 			}
-			if result.len() != 1 || !compact_arrays {
+			if result.len() != 1 || !options.inner.compact_arrays {
 				return Ok(result.into());
 			}
 			if let Some(active_property) = active_property {
@@ -93,7 +94,7 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 					.and_then(|property| active_context.term_definitions.get(property))
 					.and_then(|definition| definition.container_mapping.as_ref());
 				if container_mapping.iter().any(|container_mapping| container_mapping == "@list");
-				then { return compact_internal(&mut active_context, active_property, list, options, compact_arrays, ordered).await; }
+				then { return compact_internal(&mut active_context, active_property, list, options).await; }
 			}
 			let mut result = T::empty_object();
 			if let Some(expanded_types) = obj.get("@type") {
@@ -113,12 +114,12 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 			if options.inner.ordered {
 				for (expanded_property, expanded_value) in obj.into_iter().collect::<BTreeMap<_, _>>() {
 					compact_element(&active_context, type_scoped_context, active_property,
-						&mut result, &expanded_property, expanded_value, options, compact_arrays, ordered).await?;
+						&mut result, &expanded_property, expanded_value, options).await?;
 				}
 			} else {
 				for (expanded_property, expanded_value) in obj.into_iter() {
 					compact_element(&active_context, type_scoped_context, active_property,
-						&mut result, &expanded_property, expanded_value, options, compact_arrays, ordered).await?;
+						&mut result, &expanded_property, expanded_value, options).await?;
 				}
 			}
 			Ok(result.into())
@@ -129,10 +130,10 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 
 async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_scoped_context: &Context<'a, T>,
 		active_property: Option<&'b str>, mut result: &mut T::Object, expanded_property: &str, expanded_value: T,
-		options: &JsonLdOptionsImpl<'a, T, F, R>, compact_arrays: bool, ordered: bool) -> Result<()> where
+		options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	match expanded_property {
 		"@id" => {
@@ -162,19 +163,18 @@ async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, t
 			let alias = compact_iri(active_context, "@type", options.inner, None, true, false)?;
 			let as_array = (options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_1 &&
 				active_context.term_definitions.get(alias.as_str()).and_then(|def| def.container_mapping.as_ref())
-				.map_or(false, |container| container.contains("@set"))) ||
-				!compact_arrays;
+				.map_or(false, |container| container.contains("@set"))) || !options.inner.compact_arrays;
 			add_value(result, &alias, compacted_value, as_array);
 		},
 		"@reverse" => {
 			let mut compacted_value = compact_internal(active_context, Some("@reverse"), expanded_value,
-				options, compact_arrays, ordered).await?.into_object().unwrap();
+				options).await?.into_object().unwrap();
 			let keys = compacted_value.iter().map(|(property, _)| property.to_string()).collect::<Vec<_>>();
 			for property in keys {
 				if let Some(term_definition) = active_context.term_definitions.get(property.as_str()) {
 					if term_definition.reverse_property {
 						let as_array = term_definition.container_mapping.as_ref()
-							.map_or(false, |container| container.contains("@set")) || !compact_arrays;
+							.map_or(false, |container| container.contains("@set")) || !options.inner.compact_arrays;
 						add_value(result, &property, compacted_value.remove(&property).unwrap(), as_array);
 					}
 				}
@@ -185,8 +185,7 @@ async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, t
 			}
 		},
 		"@preserve" => {
-			let compacted_value = compact_internal(active_context, active_property, expanded_value,
-				options, compact_arrays, ordered).await?;
+			let compacted_value = compact_internal(active_context, active_property, expanded_value, options).await?;
 			if compacted_value.as_array().map_or(true, |array| !array.is_empty()) {
 				result.insert("@preserve".to_string(), compacted_value.into());
 			}
@@ -211,8 +210,7 @@ async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, t
 					let item_active_property = compact_iri(active_context, expanded_property, options.inner,
 						Some(&expanded_item), true, active_property == Some("@reverse"))?;
 					let mut nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
-					compact_item(active_context, item_active_property, &mut nest_result, expanded_item,
-						options, compact_arrays, ordered).await?;
+					compact_item(active_context, item_active_property, &mut nest_result, expanded_item, options).await?;
 				}
 			}
 		}
@@ -221,21 +219,20 @@ async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, t
 }
 
 async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_property: String, nest_result: &mut T::Object,
-		expanded_item: T, options: &JsonLdOptionsImpl<'a, T, F, R>, compact_arrays: bool, ordered: bool) -> Result<()>  where
+		expanded_item: T, options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<()>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let container = active_context.term_definitions.get(item_active_property.as_str())
 		.and_then(|term_definition| term_definition.container_mapping.clone())
 		.unwrap_or(BTreeSet::new());
 	let as_array = container.contains("@set") || item_active_property == "@graph" ||
-		item_active_property == "@list" || !compact_arrays;
+		item_active_property == "@list" || !options.inner.compact_arrays;
 	if expanded_item.as_object().is_some() {
 		let mut expanded_item = expanded_item.into_object().unwrap();
 		if let Some(list) = expanded_item.remove("@list") {
-			let compacted_item = compact_internal(active_context, Some(&item_active_property), list,
-				options, compact_arrays, ordered).await?;
+			let compacted_item = compact_internal(active_context, Some(&item_active_property), list, options).await?;
 			let compacted_item = if compacted_item.as_array().is_some() {
 				compacted_item.into_array().unwrap()
 			} else {
@@ -255,7 +252,7 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 			}
 		} else if is_graph_object::<T>(&expanded_item) {
 			let compacted_item = compact_internal(active_context, Some(&item_active_property),
-				expanded_item.remove("@graph").unwrap(), options, compact_arrays, ordered).await?;
+				expanded_item.remove("@graph").unwrap(), options).await?;
 			if container.contains("@graph") && container.contains("@id") {
 				let mut new_map_object = None;
 				let map_object = nest_result.get_mut(&item_active_property).map_or_else(|| {
@@ -309,14 +306,14 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 				add_value::<T>(nest_result, &item_active_property, obj.into(), as_array);
 			}
 		} else {
-			let compacted_item = compact_internal(active_context, Some(&item_active_property), expanded_item.clone().into(),
-				options, compact_arrays, ordered).await?;
+			let compacted_item = compact_internal(active_context, Some(&item_active_property),
+				expanded_item.clone().into(), options).await?;
 			compact_node_or_set(active_context, item_active_property, nest_result,
 				expanded_item.into(), compacted_item, container, options, as_array).await?;
 		}
 	} else {
-		let compacted_item = compact_internal(active_context, Some(&item_active_property), expanded_item.clone(),
-			options, compact_arrays, ordered).await?;
+		let compacted_item = compact_internal(active_context, Some(&item_active_property),
+			expanded_item.clone(), options).await?;
 		compact_node_or_set(active_context, item_active_property, nest_result,
 			expanded_item, compacted_item, container, options, as_array).await?;
 	}
@@ -327,8 +324,8 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 		nest_result: &mut T::Object, mut expanded_item: T, mut compacted_item: T,
 		container: BTreeSet<String>, options: &JsonLdOptionsImpl<'a, T, F, R>, as_array: bool) -> Result<()>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	if_chain! {
 		if !container.contains("@graph");
@@ -401,7 +398,10 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 						let mut element = T::empty_object();
 						element.insert("@id".to_string(), expanded_item.into_object().unwrap().remove("@id").unwrap_or_else(|| T::null()));
 						let compacted_item = compact_internal(active_context, Some(&item_active_property), element.into(),
-							options, false, false).await?;
+							&JsonLdOptionsImpl {
+								inner: &JsonLdOptions { compact_arrays: false, ordered: false, ..(*options.inner).clone() },
+								loaded_contexts: MaybeOwned::Borrowed(&options.loaded_contexts)
+							}).await?;
 						add_value(map_object, &map_key, compacted_item, as_array);
 					} else {
 						add_value(map_object, &map_key, compacted_item, as_array);

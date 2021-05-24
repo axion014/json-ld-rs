@@ -303,7 +303,7 @@ pub mod JsonLdProcessor {
 		} else {
 			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
 		};
-		compact_internal(&mut active_context, None, expanded_input.into(), &options, options.inner.compact_arrays, options.inner.ordered).await
+		compact_internal(&mut active_context, None, expanded_input.into(), &options).await
 	}
 
 	pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) ->
