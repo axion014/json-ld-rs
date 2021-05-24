@@ -7,7 +7,7 @@ use once_cell::unsync::OnceCell;
 
 use json_trait::{ForeignMutableJson, BuildableJson};
 
-use maybe_owned::MaybeOwnedMut;
+use maybe_owned::MaybeOwned;
 
 use url::Url;
 
@@ -218,7 +218,7 @@ pub struct JsonLdOptionsImpl<'a, T, F, R> where
 	R: Future<Output = Result<RemoteDocument<T>>> + 'a
 {
 	inner: &'a JsonLdOptions<'a, T, F, R>,
-	loaded_contexts: MaybeOwnedMut<'a, FrozenMap<Url, Box<LoadedContext<T>>>>
+	loaded_contexts: MaybeOwned<'a, FrozenMap<Url, Box<LoadedContext<T>>>>
 }
 
 impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a, T, F, R> where
@@ -229,7 +229,7 @@ impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a
 	fn from(value: &'a JsonLdOptions<'a, T, F, R>) -> Self {
 		JsonLdOptionsImpl {
 			inner: value,
-			loaded_contexts: MaybeOwnedMut::Owned(FrozenMap::new())
+			loaded_contexts: MaybeOwned::Owned(FrozenMap::new())
 		}
 	}
 }
@@ -239,7 +239,7 @@ pub mod JsonLdProcessor {
 	use std::collections::HashSet;
 	use std::borrow::Cow;
 
-	use maybe_owned::MaybeOwnedMut;
+	use maybe_owned::MaybeOwned;
 
 	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context};
 	use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
@@ -258,7 +258,7 @@ pub mod JsonLdProcessor {
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
 		R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
 	{
-		let mut options = options.into();
+		let options = options.into();
 		let input = if let JsonLdInput::Reference(iri) = input {
 			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?))
 		} else {
@@ -271,7 +271,7 @@ pub mod JsonLdProcessor {
 				ordered: false,
 				..(*options.inner).clone()
 			},
-			loaded_contexts: MaybeOwnedMut::Borrowed(options.loaded_contexts.as_mut())
+			loaded_contexts: MaybeOwned::Borrowed(options.loaded_contexts.as_ref())
 		};
 		let expanded_input = expand(&input, expand_options).await?;
 
