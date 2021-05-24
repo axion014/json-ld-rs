@@ -241,15 +241,16 @@ pub mod JsonLdProcessor {
 
 	use maybe_owned::MaybeOwned;
 
-	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context};
-	use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
+	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context, RemoteDocument};
+	use crate::error::{Result, JsonLdErrorCode::{LoadingDocumentFailed, InvalidBaseIRI}};
 	use crate::remote::{self, LoadDocumentOptions};
 	use crate::context::process_context;
 	use crate::compact::compact_internal;
+	use crate::expand::expand_internal;
 	use crate::util::map_context;
 
-	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson};
-	use cc_traits::{Get, Remove};
+	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*};
+	use cc_traits::{Get, Remove, PushBack, Len};
 	use url::Url;
 
 	pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
@@ -312,7 +313,69 @@ pub mod JsonLdProcessor {
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
 		R: Future<Output = Result<crate::RemoteDocument<T>>> + 'a
 	{
-		todo!()
+		let options = options.into();
+		let input = if let JsonLdInput::Reference(iri) = input {
+			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?))
+		} else {
+			Cow::Borrowed(input)
+		};
+		let mut active_context = Context {
+			base_iri: options.inner.base.as_ref().or_else(|| if let JsonLdInput::RemoteDocument(ref document) = *input {
+				Some(&document.document_url)
+			} else {
+				None
+			}).map(|iri| Url::parse(iri).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?,
+			original_base_url: if let JsonLdInput::RemoteDocument(ref document) = *input {
+				Some(&document.document_url)
+			} else {
+				options.inner.base.as_ref()
+			}.map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?,
+			..Context::default()
+		};
+		if let Some(ref expand_context) = options.inner.expand_context {
+			let context = match expand_context {
+				JsonOrReference::JsonObject(json) => json.get("@context")
+					.map_or(Ok(vec![Some(JsonOrReference::JsonObject(json.clone()))]), |json| map_context(Cow::Borrowed(json))),
+				JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri.clone()))])
+			}?;
+			active_context = process_context(&active_context, context, active_context.original_base_url.as_ref(),
+				&options, &mut HashSet::new(), false, true, true).await?;
+		}
+		if let JsonLdInput::RemoteDocument(RemoteDocument { context_url: Some(ref context_url), .. }) = *input {
+			active_context = process_context(&active_context, vec![Some(JsonOrReference::Reference(context_url.to_string().into()))],
+				Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
+				&options, &mut HashSet::new(), false, true, true).await?;
+		}
+		let (input, document_url) = match input.into_owned() {
+			JsonLdInput::RemoteDocument(document) => {
+				(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url.clone()))
+			},
+			JsonLdInput::JsonObject(json) => (json.into(), options.inner.base.clone()),
+			JsonLdInput::Reference(_) => unreachable!()
+		};
+		let document_url = document_url.as_ref().map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?;
+		let expanded_output = expand_internal(&active_context, None, input, document_url.as_ref(), &options, false).await?;
+		Ok(match expanded_output.into_enum() {
+			Owned::Object(mut object) if object.len() == 1 && object.contains("@graph") => {
+				match object.remove("@graph").unwrap().into_enum() {
+					// Only one level of recursion, for sure
+					Owned::Array(array) => array,
+					Owned::Null => T::empty_array(),
+					expanded_output => {
+						let mut array = T::empty_array();
+						array.push_back(expanded_output.into_untyped());
+						array
+					}
+				}
+			},
+			Owned::Array(array) => array,
+			Owned::Null => T::empty_array(),
+			expanded_output => {
+				let mut array = T::empty_array();
+				array.push_back(expanded_output.into_untyped());
+				array
+			}
+		})
 	}
 
 	pub async fn flatten<'a, T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLdContext<'_, T>>,
