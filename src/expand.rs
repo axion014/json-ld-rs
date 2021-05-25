@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::future::Future;
 
-use json_trait::{ForeignMutableJson, BuildableJson};
-use cc_traits::Get;
+use json_trait::{ForeignMutableJson, BuildableJson, typed_json::{self, *}};
+use cc_traits::{Get, MapInsert};
 
 use url::Url;
 
 use if_chain::if_chain;
 
-use crate::{Context, JsonLdOptions, JsonLdOptionsImpl, LoadDocumentOptions, RemoteDocument};
+use crate::{Context, JsonLdOptions, JsonLdOptionsImpl, LoadDocumentOptions, RemoteDocument, TermDefinition};
 use crate::error::{Result, JsonLdErrorCode::InvalidBaseIRI};
 use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, resolve_with_str, as_compact_iri};
 use crate::context::create_term_definition;
@@ -98,4 +98,32 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(mut args: IRIExpansionArguments<'a, 'b, T
 		));
 	}
 	Ok(Some(value.to_string()))
+}
+
+fn expand_value<T: ForeignMutableJson + BuildableJson>(
+		active_context: &Context<'_, T>, definition: Option<&TermDefinition<T>>, value: typed_json::Owned<T>) -> Result<T::Object> {
+	let type_mapping = definition.and_then(|definition| definition.type_mapping.as_deref());
+	if let (Some(type_mapping @ ("@id" | "@vocab")), Owned::String(value)) = (type_mapping, &value) {
+		let mut object = T::empty_object();
+		object.insert("@id".to_string(), expand_iri!(active_context, value, true, type_mapping == "@vocab")?
+			.map(|iri| iri.into()).unwrap_or(T::null()));
+		return Ok(object);
+	}
+	let mut result = T::empty_object();
+	if let Some(type_mapping) = type_mapping {
+		if type_mapping != "@none" {
+			result.insert("@type".to_string(), type_mapping.into());
+		}
+	} else if let Owned::String(_) = value {
+		if let Some(language) = definition.and_then(|definition| definition.language_mapping.as_deref())
+				.or(active_context.default_language.as_deref()) {
+			result.insert("@language".to_string(), language.into());
+		}
+		if let Some(direction) = definition.and_then(|definition| definition.direction_mapping.as_ref())
+				.or(active_context.default_base_direction.as_ref()) {
+			result.insert("@direction".to_string(), direction.as_ref().into());
+		}
+	}
+	result.insert("@value".to_string(), value.into_untyped());
+	Ok(result)
 }
