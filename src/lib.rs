@@ -25,6 +25,8 @@ mod compact;
 mod expand;
 mod util;
 
+pub use crate::remote::load_remote;
+
 use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
 
@@ -286,7 +288,7 @@ pub mod JsonLdProcessor {
 	{
 		let options = options.into();
 		let input = if let JsonLdInput::Reference(iri) = input {
-			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?))
+			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options.inner, None, Vec::new()).await?))
 		} else {
 			Cow::Borrowed(input)
 		};
@@ -340,7 +342,7 @@ pub mod JsonLdProcessor {
 	{
 		let options = options.into();
 		let input = if let JsonLdInput::Reference(iri) = input {
-			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options, None, Vec::new()).await?))
+			Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options.inner, None, Vec::new()).await?))
 		} else {
 			Cow::Borrowed(input)
 		};

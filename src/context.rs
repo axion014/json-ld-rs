@@ -89,7 +89,8 @@ pub async fn process_context<'a, 'b, T, F, R>(
 					let loaded_context = if let Some(loaded_context) = options.loaded_contexts.get(&context) {
 						loaded_context
 					} else {
-						let context_document = load_remote(context.as_str(), options, Some("http://www.w3.org/ns/json-ld#context".to_string()),
+						let context_document = load_remote(context.as_str(), options.inner,
+								Some("http://www.w3.org/ns/json-ld#context".to_string()),
 								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
 							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
 						let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
@@ -113,7 +114,8 @@ pub async fn process_context<'a, 'b, T, F, R>(
 						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 						if let Some(import_url) = import_url.as_string() {
 							let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
-							let import = load_remote(import.as_str(), options, Some("http://www.w3.org/ns/json-ld#context".to_string()),
+							let import = load_remote(import.as_str(), options.inner,
+								Some("http://www.w3.org/ns/json-ld#context".to_string()),
 								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
 									.map_err(|e| {
 										if let LoadingDocumentFailed = e.code {

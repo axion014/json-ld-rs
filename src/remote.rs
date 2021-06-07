@@ -4,7 +4,7 @@ mod defaultdocumentloader;
 use std::future::Future;
 use json_trait::{ForeignMutableJson, BuildableJson};
 
-use crate::{JsonLdOptionsImpl, RemoteDocument};
+use crate::{JsonLdOptions, RemoteDocument};
 use crate::error::JsonLdError;
 
 pub struct LoadDocumentOptions {
@@ -13,7 +13,7 @@ pub struct LoadDocumentOptions {
 	pub request_profile: Vec<String>
 }
 
-pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptionsImpl<'a, T, F, R>,
+pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptions<'a, T, F, R>,
 	profile: Option<String>, request_profile: Vec<String>) ->
 		Result<RemoteDocument<T>, JsonLdError> where
 	T: ForeignMutableJson + BuildableJson,
@@ -21,11 +21,11 @@ pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptionsImpl<'a,
 	R: Future<Output = Result<RemoteDocument<T>, JsonLdError>>
 {
 	let load_document_options = Some(LoadDocumentOptions {
-		extract_all_scripts: options.inner.extract_all_scripts,
+		extract_all_scripts: options.extract_all_scripts,
 		profile,
 		request_profile
 	});
-	if let Some(ref document_loader) = options.inner.document_loader {
+	if let Some(ref document_loader) = options.document_loader {
 		Ok(document_loader(iri, &load_document_options).await?)
 	} else {
 		#[cfg(feature = "reqwest-loader")]
