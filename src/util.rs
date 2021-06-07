@@ -44,19 +44,22 @@ pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<
 	if direction == "@none" && language != "" {
 		language
 	} else if (language == "@null"|| language == "@none") && direction != "" {
-		direction.to_string()
+		"_".to_string() + direction
 	} else {
-		language + &direction
+		language + "_" + &direction
 	}
 }
 
 pub fn is_graph_object<T: ForeignJson>(value: &T::Object) -> bool {
-	value.contains("@graph") && value.iter().filter(|(key, _)| key != &"@id" && key != &"@index").count() == 1
+	let mut non_optional_keys = value.iter().map(|(key, _)| key).filter(|key| key != &"@id" && key != &"@index");
+	non_optional_keys.next().as_deref() == Some("@graph") && non_optional_keys.next() == None
 }
 
 pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, key: &str, value: T, as_array: bool) {
 	if as_array && object.get(key).map_or(true, |v| v.as_array().is_none()) {
-		object.insert(key.to_string(), T::empty_array().into());
+		let mut array = T::empty_array();
+		if let Some(original_value) = object.remove(key) { array.push_back(original_value); }
+		object.insert(key.to_string(), array.into());
 	}
 	if value.as_array().is_some() {
 		let value = value.into_array().unwrap();

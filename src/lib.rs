@@ -73,8 +73,8 @@ pub enum Direction {
 impl AsRef<str> for Direction {
 	fn as_ref(&self) -> &str {
 		match self {
-			Direction::LTR => "_ltr",
-			Direction::RTL => "_rtl",
+			Direction::LTR => "ltr",
+			Direction::RTL => "rtl",
 			Direction::None => "@none"
 		}
 	}
