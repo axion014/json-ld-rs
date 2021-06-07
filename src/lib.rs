@@ -1,4 +1,6 @@
 #![feature(try_find)]
+#![feature(unboxed_closures)]
+#![feature(fn_traits)]
 
 use std::future::Future;
 use std::collections::{HashMap, BTreeMap, BTreeSet};
@@ -25,6 +27,27 @@ mod util;
 
 use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
+
+#[derive(Clone)] pub struct Never<T> { _foo: std::marker::PhantomData<T>, _bar: Inner }
+#[derive(Clone)] enum Inner {}
+
+impl <T> FnOnce<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
+	type Output = Never<T>;
+    extern "rust-call" fn call_once(self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
+}
+
+impl <T> FnMut<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
+    extern "rust-call" fn call_mut(&mut self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
+}
+
+impl <T> Fn<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
+    extern "rust-call" fn call(&self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
+}
+
+impl <T: ForeignMutableJson + BuildableJson> Future for Never<T> {
+	type Output = Result<RemoteDocument<T>>;
+	fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> { unreachable!(); }
+}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
