@@ -1,3 +1,5 @@
+#![feature(try_find)]
+
 use std::future::Future;
 use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::borrow::{Borrow, Cow};
@@ -310,8 +312,8 @@ pub mod JsonLdProcessor {
 	pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) ->
 			Result<<T as ForeignJson>::Array> where
 		T: ForeignMutableJson + BuildableJson,
-		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-		R: Future<Output = Result<crate::RemoteDocument<T>>> + 'a
+		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
+		R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
 	{
 		let options = options.into();
 		let input = if let JsonLdInput::Reference(iri) = input {
@@ -355,7 +357,7 @@ pub mod JsonLdProcessor {
 		};
 		let document_url = document_url.as_ref().map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?;
 		let expanded_output = expand_internal(&active_context, None, input, document_url.as_ref(), &options, false).await?;
-		Ok(match expanded_output.into_enum() {
+		Ok(match expanded_output {
 			Owned::Object(mut object) if object.len() == 1 && object.contains("@graph") => {
 				match object.remove("@graph").unwrap().into_enum() {
 					// Only one level of recursion, for sure
