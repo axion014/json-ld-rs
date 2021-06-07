@@ -2,7 +2,7 @@ use std::collections::{HashSet, BTreeMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
 
-use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object};
+use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object, MutableObject};
 use cc_traits::{Get, GetMut, Len, PushBack, Remove, MapInsert};
 
 use maybe_owned::MaybeOwned;
@@ -96,7 +96,6 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 				if container_mapping.iter().any(|container_mapping| container_mapping == "@list");
 				then { return compact_internal(&mut active_context, active_property, list, options).await; }
 			}
-			let mut result = T::empty_object();
 			if let Some(expanded_types) = obj.get("@type") {
 				// Collecting into a BTreeSet applies lexicographic sort implicitly
 				let compacted_types = expanded_types.as_array().unwrap().iter()
@@ -111,111 +110,108 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 					}
 				}
 			}
-			if options.inner.ordered {
-				for (expanded_property, expanded_value) in obj.into_iter().collect::<BTreeMap<_, _>>() {
-					compact_element(&active_context, type_scoped_context, active_property,
-						&mut result, &expanded_property, expanded_value, options).await?;
-				}
+			Ok(if options.inner.ordered {
+				compact_map(&active_context, type_scoped_context, active_property,
+					obj.into_iter().collect::<BTreeMap<_, _>>(), options).await?
 			} else {
-				for (expanded_property, expanded_value) in obj.into_iter() {
-					compact_element(&active_context, type_scoped_context, active_property,
-						&mut result, &expanded_property, expanded_value, options).await?;
-				}
-			}
-			Ok(result.into())
+				compact_map(&active_context, type_scoped_context, active_property, obj, options).await?
+			}.into())
 		},
 		element => Ok(element.into_untyped())
 	}
 }
 
-async fn compact_element<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_scoped_context: &Context<'a, T>,
-		active_property: Option<&'b str>, mut result: &mut T::Object, expanded_property: &str, expanded_value: T,
-		options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
+async fn compact_map<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_scoped_context: &Context<'a, T>,
+		active_property: Option<&'b str>, expanded_map: impl MutableObject<T>,
+		options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<T::Object> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
-	match expanded_property {
-		"@id" => {
-			let compacted_value = if let Some(expanded_value) = expanded_value.as_string() {
-				compact_iri(active_context, expanded_value, options.inner, None, false, false)?.into()
-			} else {
-				T::null()
-			};
-			let alias = compact_iri(active_context, "@id", options.inner, None, true, false)?;
-			result.insert(alias, compacted_value);
-		},
-		"@type" => {
-			let compacted_value: T = match expanded_value.as_enum() {
-				Borrowed::String(expanded_value) => {
-					compact_iri(type_scoped_context, expanded_value, options.inner, None, true, false)?.into()
-				},
-				Borrowed::Array(type_array) => {
-					let mut compacted_value = T::empty_array();
-					for expanded_type in type_array.iter() {
-						compacted_value.push_back(compact_iri(type_scoped_context, expanded_type.as_string().unwrap(),
-							options.inner, None, true, false)?.into());
-					}
-					compacted_value.into()
-				},
-				_ => panic!()
-			};
-			let alias = compact_iri(active_context, "@type", options.inner, None, true, false)?;
-			let as_array = (options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_1 &&
-				active_context.term_definitions.get(alias.as_str()).and_then(|def| def.container_mapping.as_ref())
-				.map_or(false, |container| container.contains("@set"))) || !options.inner.compact_arrays;
-			add_value(result, &alias, compacted_value, as_array);
-		},
-		"@reverse" => {
-			let mut compacted_value = compact_internal(active_context, Some("@reverse"), expanded_value,
-				options).await?.into_object().unwrap();
-			let keys = compacted_value.iter().map(|(property, _)| property.to_string()).collect::<Vec<_>>();
-			for property in keys {
-				if let Some(term_definition) = active_context.term_definitions.get(property.as_str()) {
-					if term_definition.reverse_property {
-						let as_array = term_definition.container_mapping.as_ref()
-							.map_or(false, |container| container.contains("@set")) || !options.inner.compact_arrays;
-						add_value(result, &property, compacted_value.remove(&property).unwrap(), as_array);
+	let mut result = T::empty_object();
+	for (expanded_property, expanded_value) in expanded_map {
+		match expanded_property.as_str() {
+			"@id" => {
+				let compacted_value = if let Some(expanded_value) = expanded_value.as_string() {
+					compact_iri(active_context, expanded_value, options.inner, None, false, false)?.into()
+				} else {
+					T::null()
+				};
+				let alias = compact_iri(active_context, "@id", options.inner, None, true, false)?;
+				result.insert(alias, compacted_value);
+			},
+			"@type" => {
+				let compacted_value: T = match expanded_value.as_enum() {
+					Borrowed::String(expanded_value) => {
+						compact_iri(type_scoped_context, expanded_value, options.inner, None, true, false)?.into()
+					},
+					Borrowed::Array(type_array) => {
+						let mut compacted_value = T::empty_array();
+						for expanded_type in type_array.iter() {
+							compacted_value.push_back(compact_iri(type_scoped_context, expanded_type.as_string().unwrap(),
+								options.inner, None, true, false)?.into());
+						}
+						compacted_value.into()
+					},
+					_ => panic!()
+				};
+				let alias = compact_iri(active_context, "@type", options.inner, None, true, false)?;
+				let as_array = (options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_1 &&
+					active_context.term_definitions.get(alias.as_str()).and_then(|def| def.container_mapping.as_ref())
+					.map_or(false, |container| container.contains("@set"))) || !options.inner.compact_arrays;
+				add_value(&mut result, &alias, compacted_value, as_array);
+			},
+			"@reverse" => {
+				let mut compacted_value = compact_internal(active_context, Some("@reverse"), expanded_value,
+					options).await?.into_object().unwrap();
+				let keys = compacted_value.iter().map(|(property, _)| property.to_string()).collect::<Vec<_>>();
+				for property in keys {
+					if let Some(term_definition) = active_context.term_definitions.get(property.as_str()) {
+						if term_definition.reverse_property {
+							let as_array = term_definition.container_mapping.as_ref()
+								.map_or(false, |container| container.contains("@set")) || !options.inner.compact_arrays;
+							add_value(&mut result, &property, compacted_value.remove(&property).unwrap(), as_array);
+						}
 					}
 				}
-			}
-			if !compacted_value.is_empty() {
-				let alias = compact_iri(active_context, "@reverse", options.inner, None, true, false)?;
-				result.insert(alias, compacted_value.into());
-			}
-		},
-		"@preserve" => {
-			let compacted_value = compact_internal(active_context, active_property, expanded_value, options).await?;
-			if compacted_value.as_array().map_or(true, |array| !array.is_empty()) {
-				result.insert("@preserve".to_string(), compacted_value.into());
-			}
-		},
-		"@index" if active_property.and_then(|active_property| active_context.term_definitions.get(active_property))
-				.and_then(|definition| definition.container_mapping.as_ref())
-				.map_or(false, |container| container.contains("@index")) => {},
-		"@direction" | "@index" | "@language" | "@value" => {
-			let alias = compact_iri(active_context, expanded_property, options.inner, None, true, false)?;
-			result.insert(alias, expanded_value.into());
-		},
-		_ => {
-			let expanded_value_array = expanded_value.into_array().unwrap();
-			if expanded_value_array.is_empty() {
-				let expanded_value = expanded_value_array.into();
-				let item_active_property = compact_iri(active_context, expanded_property, options.inner,
-					Some(&expanded_value), true, active_property == Some("@reverse"))?;
-				let nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
-				add_value::<T>(nest_result, &item_active_property, expanded_value, true);
-			} else {
-				for expanded_item in expanded_value_array.into_iter() {
-					let item_active_property = compact_iri(active_context, expanded_property, options.inner,
-						Some(&expanded_item), true, active_property == Some("@reverse"))?;
-					let mut nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
-					compact_item(active_context, item_active_property, &mut nest_result, expanded_item, options).await?;
+				if !compacted_value.is_empty() {
+					let alias = compact_iri(active_context, "@reverse", options.inner, None, true, false)?;
+					result.insert(alias, compacted_value.into());
+				}
+			},
+			"@preserve" => {
+				let compacted_value = compact_internal(active_context, active_property, expanded_value, options).await?;
+				if compacted_value.as_array().map_or(true, |array| !array.is_empty()) {
+					result.insert("@preserve".to_string(), compacted_value.into());
+				}
+			},
+			"@index" if active_property.and_then(|active_property| active_context.term_definitions.get(active_property))
+					.and_then(|definition| definition.container_mapping.as_ref())
+					.map_or(false, |container| container.contains("@index")) => {},
+			"@direction" | "@index" | "@language" | "@value" => {
+				let alias = compact_iri(active_context, expanded_property.as_str(), options.inner, None, true, false)?;
+				result.insert(alias, expanded_value.into());
+			},
+			_ => {
+				let expanded_value_array = expanded_value.into_array().unwrap();
+				if expanded_value_array.is_empty() {
+					let expanded_value = expanded_value_array.into();
+					let item_active_property = compact_iri(active_context, expanded_property.as_str(), options.inner,
+						Some(&expanded_value), true, active_property == Some("@reverse"))?;
+					let nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
+					add_value::<T>(nest_result, &item_active_property, expanded_value, true);
+				} else {
+					for expanded_item in expanded_value_array.into_iter() {
+						let item_active_property = compact_iri(active_context, expanded_property.as_str(), options.inner,
+							Some(&expanded_item), true, active_property == Some("@reverse"))?;
+						let mut nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
+						compact_item(active_context, item_active_property, &mut nest_result, expanded_item, options).await?;
+					}
 				}
 			}
 		}
 	}
-	Ok(())
+	Ok(result)
 }
 
 async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_property: String, nest_result: &mut T::Object,
