@@ -18,7 +18,7 @@ macro_rules! expand_iri {
 		expand_iri!($active_context, $value, false)
 	};
 	($active_context:expr,$value:expr,$document_relative:expr) => {
-		expand_iri!($active_context, $value, $document_relative, false)
+		expand_iri!($active_context, $value, $document_relative, true)
 	};
 	($active_context:expr,$value:expr,$document_relative:expr,$vocab:expr) => {
 		// FIXME: Waiting for Never type to arrive
