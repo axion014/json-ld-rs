@@ -584,6 +584,32 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 			result.insert(key, expand_internal(active_context, active_property, value, base_url, options, false).await?.into_untyped());
 		}
 		"@reverse" => {
+			if value.as_object().is_some() {
+				let expanded_value = expand_internal(active_context, Some("@reverse"), value, base_url, options, false).await?;
+				if let Owned::Object(mut expanded_value) = expanded_value {
+					if let Some(reverse) = expanded_value.remove("@reverse").map(|reverse| reverse.into_object().unwrap()) {
+						for (property, item) in reverse.into_iter() { add_value(result, &property, item, true); }
+					}
+					if !expanded_value.is_empty() {
+						let reverse_map = if let Some(reverse_map) = result.get_mut("@reverse") { reverse_map } else {
+							result.insert("@reverse".to_string(), T::empty_object().into());
+							result.get_mut("@reverse").unwrap()
+						}.as_object_mut().unwrap();
+						for (property, items) in expanded_value {
+							for item in items.into_array().unwrap() {
+								if let Some(item) = item.as_object() {
+									if item.contains("@value") || item.contains("@list") {
+										return Err(err!(InvalidReversePropertyValue));
+									}
+								}
+								add_value(reverse_map, &property, item, true);
+							}
+						}
+					}
+				}
+			} else {
+				return Err(err!(InvalidReverseValue));
+			}
 			todo!();
 		},
 		"@nest" => {
