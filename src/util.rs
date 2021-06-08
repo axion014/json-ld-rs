@@ -41,12 +41,13 @@ pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
 pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<D>) -> String {
 	let language = language.map_or_else(|| "".to_string(), |language| language.to_ascii_lowercase());
 	let direction = direction.as_ref().map_or("", |direction| direction.as_ref());
-	if direction == "@none" && language != "" {
-		language
-	} else if (language == "@null"|| language == "@none") && direction != "" {
-		"_".to_string() + direction
-	} else {
-		language + "_" + &direction
+	match (language.as_str(), direction) {
+		("", "") => language,
+		(_, "") => language,
+		("", "@none") => "@none".to_string(),
+		(_, "@none") => language,
+		("@null" | "@none", _) => "_".to_string() + direction,
+		_ => language + "_" + &direction
 	}
 }
 
