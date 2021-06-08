@@ -188,13 +188,15 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let mut nests = BTreeMap::new();
-	for (key, value) in element.into_iter()
-			.map(|(key, value)| (expand_iri!(&active_context, &key), value))
-			.filter_map(|(key, value)| key.transpose().map(|key| (key, value)))
-			.filter(|(key, _)| key.as_ref().map_or(true, |key| key.contains(':') || is_jsonld_keyword(&key))) {
-		let key = key?;
-		if is_jsonld_keyword(&key) {
-			expand_keyword(result, &mut nests, &active_context, &type_scoped_context, active_property, key, value,
+
+	// Expand all keys, drop any that could not be expanded
+	for (key, expanded_property, value) in element.into_iter()
+			.filter_map(|(key, value)| expand_iri!(&active_context, &key).transpose()
+				.map(|expanded_property| (key, expanded_property, value)))
+			.filter(|(_, key, _)| key.as_ref().map_or(true, |key| key.contains(':') || is_jsonld_keyword(&key))) {
+		let expanded_property = expanded_property?;
+		if is_jsonld_keyword(&expanded_property) {
+			expand_keyword(result, &mut nests, &active_context, &type_scoped_context, active_property, expanded_property, value,
 				base_url, &input_type, options).await?;
 			continue;
 		}
@@ -291,13 +293,13 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 				if item.as_object().map_or(false, |item| item.contains("@value") || item.contains("@list")) {
 					return Err(err!(InvalidReversePropertyValue));
 				}
-				if !reverse_map.contains(&key) {
-					reverse_map.insert(key.clone(), T::empty_array().into());
+				if !reverse_map.contains(&expanded_property) {
+					reverse_map.insert(expanded_property.clone(), T::empty_array().into());
 				}
-				add_value(reverse_map, &key, item, true);
+				add_value(reverse_map, &expanded_property, item, true);
 			}
 		} else {
-			add_value(result, &key, expanded_value.into_untyped(), true);
+			add_value(result, &expanded_property, expanded_value.into_untyped(), true);
 		}
 	}
 	for (_, nested_values) in nests {
