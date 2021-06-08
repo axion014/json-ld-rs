@@ -150,16 +150,16 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 				let mut array = T::empty_array();
 				array.push_back(result.remove("@type").unwrap());
 				result.insert("@type".to_string(), array.into());
-			} else if result.contains("@set") || result.contains("@list") {
-				if result.len() != if result.contains("@index") { 2 } else { 1 } {
+			} else if let Some(set) = result.remove("@set") {
+				if result.len() != if result.contains("@index") { 1 } else { 0 } {
 					return Err(err!(InvalidSetOrListObject));
 				}
-				if let Some(set) = result.remove("@set") {
-					match set.into_enum() {
-						Owned::Object(set) => result = set,
-						set => return Ok(set)
-					}
+				match set.into_enum() {
+					Owned::Object(set) => result = set,
+					set => return Ok(set)
 				}
+			} else if result.contains("@list") && result.len() != if result.contains("@index") { 2 } else { 1 } {
+				return Err(err!(InvalidSetOrListObject));
 			}
 			if (result.len() == 1 && result.contains("@language")) ||
 					(active_property.is_none() || active_property == Some("@graph")) &&
@@ -170,7 +170,7 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			Ok(Owned::Object(result))
 		},
 		value => {
-			if active_property == None || active_property == Some("@graph") { return Ok(Owned::Null) }
+			if active_property.is_none() || active_property == Some("@graph") { return Ok(Owned::Null) }
 			Ok(Owned::Object(if let Some(property_scoped_context) = property_scoped_context {
 				expand_value(&process_context(active_context, vec![Some(property_scoped_context.clone())],
 					definition.unwrap().base_url.as_ref(), options, &mut HashSet::new(), false, true, true).await?,

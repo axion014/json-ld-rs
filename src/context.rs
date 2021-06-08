@@ -378,13 +378,11 @@ pub fn create_term_definition<T, F, R>(
 					},
 					_ => return Err(err!(InvalidContainerMapping))
 				});
-				if let Some(ref container) = definition.container_mapping {
-					if container.iter().any(|s| s == "@type") {
-						match definition.type_mapping.as_deref() {
-							None => definition.type_mapping = Some("@id".to_string()),
-							Some("@id") | Some("vocab") => {},
-							_ => return Err(err!(InvalidTypeMapping))
-						}
+				if definition.container_mapping.as_ref().unwrap().iter().any(|s| s == "@type") {
+					match definition.type_mapping.as_deref() {
+						None => definition.type_mapping = Some("@id".to_string()),
+						Some("@id") | Some("vocab") => {},
+						_ => return Err(err!(InvalidTypeMapping))
 					}
 				}
 			}
