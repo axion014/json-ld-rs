@@ -47,13 +47,18 @@ fn process_direction<T: ForeignJson>(value: &T, nullify: bool) -> Result<Option<
 
 fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 	let len = container.len();
-	if container.iter().any(|s| s == "@list") && len > 1 {
-		return Err(err!(InvalidContainerMapping));
-	} else if container.iter().any(|s| s == "@graph") && container.iter()
-			.any(|s| s != "@graph" && s != "@id" && s != "@index" && s != "@set") {
-		return Err(err!(InvalidContainerMapping));
-	} else if len > 1 && (container.iter().all(|s| s != "@set") || len != 2) {
-		return Err(err!(InvalidContainerMapping));
+	if container.contains("@graph") {
+		if container.iter().any(|s| s != "@graph" && s != "@id" && s != "@index" && s != "@set") {
+			return Err(err!(InvalidContainerMapping,
+				"@graph container can't be composed with container types other than @id, @index, and @set"));
+		}
+	} else if len > 1 {
+		if container.contains("@list") {
+			return Err(err!(InvalidContainerMapping, "@list container can't be composed with other container types"));
+		}
+		if !container.contains("@set") || len != 2 {
+			return Err(err!(InvalidContainerMapping));
+		}
 	}
 	Ok(container)
 }
