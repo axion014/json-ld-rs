@@ -334,7 +334,7 @@ pub fn create_term_definition<T, F, R>(
 							if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
 						},
 						"@id" | "@vocab" => {},
-						_ => return Err(err!(InvalidTypeMapping))
+						_ => if !is_iri(ty) { return Err(err!(InvalidTypeMapping)); }
 					}
 				}
 				definition.type_mapping = ty;

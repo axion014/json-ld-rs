@@ -18,7 +18,10 @@ use crate::{
 	TermDefinition, JsonOrReference, JsonLdProcessingMode, Direction
 };
 use crate::error::{Result, JsonLdErrorCode::*};
-use crate::util::{is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, resolve_with_str, as_compact_iri, add_value, is_graph_object};
+use crate::util::{
+	is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, is_graph_object,
+	resolve_with_str, as_compact_iri, add_value, map_context
+};
 use crate::context::{process_context, create_term_definition};
 
 #[async_recursion(?Send)]
@@ -77,7 +80,7 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			let mut obj = obj.into_iter().collect::<BTreeMap<_, _>>();
 			if let Some(context) = obj.remove("@context") {
 				active_context = Cow::Owned(process_context(&active_context,
-					vec![Some(JsonOrReference::JsonObject(Cow::Owned(context.into_object().ok_or(err!(InvalidLocalContext))?)))],
+					map_context(Cow::Owned(context))?,
 					base_url, options, &mut HashSet::new(), false, true, true).await?);
 			}
 			let type_scoped_context = active_context.clone();
@@ -156,8 +159,8 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			}
 			if (result.len() == 1 && result.contains("@language")) ||
 					(active_property.is_none() || active_property == Some("@graph")) &&
-					result.is_empty() || (result.len() == 1 && (result.contains("@value") || result.contains("@list") ||
-					(!options.inner.frame_expansion && result.contains("@id")))) {
+					(result.is_empty() || (result.len() == 1 && (result.contains("@value") || result.contains("@list") ||
+					(!options.inner.frame_expansion && result.contains("@id"))))) {
 				return Ok(Owned::Null);
 			}
 			Ok(Owned::Object(result))
@@ -610,7 +613,6 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 			} else {
 				return Err(err!(InvalidReverseValue));
 			}
-			todo!();
 		},
 		"@nest" => {
 			nests.insert(key, T::empty_array().into());
