@@ -26,7 +26,7 @@ const MAX_CONTEXTS: usize = 25; // The number's placeholder
 fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 	Ok(match value.as_enum() {
 		Borrowed::String(lang) => Some(lang.to_owned()),
-		Borrowed::Null => Some("@null".to_owned()),
+		Borrowed::Null => None,
 		_ => return Err(err!(InvalidDefaultLanguage))
 	})
 }
@@ -408,7 +408,7 @@ pub fn create_term_definition<T, F, R>(
 			}
 			if !value.contains("@type") {
 				if let Some(language) = value.get("@language") {
-					definition.language_mapping = process_language(language)?;
+					definition.language_mapping = Some(process_language(language)?);
 				}
 				if let Some(direction) = value.get("@direction") {
 					definition.direction_mapping = process_direction(direction, false)?;
@@ -496,11 +496,11 @@ pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> HashMap
 			},
 			Some(type_mapping) => insert("@type", type_mapping, key),
 			None => {
-				let mut lang_dir = make_lang_dir(value.language_mapping.as_ref().cloned(), value.direction_mapping.as_ref());
+				let mut lang_dir = make_lang_dir(value.language_mapping.as_ref().cloned()
+					.map(|lang| lang.unwrap_or_else(|| "@null".to_string())), value.direction_mapping.as_ref());
 				if lang_dir == "" {
-					let default_language = active_context.default_language.as_ref()
-						.map_or_else(|| "@none".to_string(), |lang| lang.to_ascii_lowercase());
-					lang_dir = make_lang_dir(Some(default_language), active_context.default_base_direction.as_ref());
+					lang_dir = make_lang_dir(active_context.default_language.as_ref().cloned(),
+						active_context.default_base_direction.as_ref());
 					insert("@language", "@none", key);
 					insert("@type", "@none", key);
 				}

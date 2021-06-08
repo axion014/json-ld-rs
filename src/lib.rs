@@ -100,7 +100,7 @@ struct TermDefinition<'a, T> where
 	container_mapping: Option<BTreeSet<String>>,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
-	language_mapping: Option<String>,
+	language_mapping: Option<Option<String>>,
 	nest_value: Option<String>,
 	type_mapping: Option<String>
 }

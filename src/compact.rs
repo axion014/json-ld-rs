@@ -663,7 +663,7 @@ fn compact_value<'a, T, F, R>(active_context: &Context<'a, T>, active_property: 
 {
 	let term_definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
 	let language = term_definition.and_then(|definition| definition.language_mapping.clone())
-		.or(active_context.default_language.clone());
+		.unwrap_or(active_context.default_language.clone());
 	let direction = term_definition.and_then(|definition| definition.direction_mapping.clone())
 		.or(active_context.default_base_direction.clone());
 	let type_mapping = term_definition.and_then(|definition| definition.type_mapping.clone());

@@ -715,8 +715,8 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(
 			result.insert("@type".to_string(), type_mapping.into());
 		}
 	} else if let Owned::String(_) = value {
-		if let Some(language) = definition.and_then(|definition| definition.language_mapping.as_deref())
-				.or(active_context.default_language.as_deref()) {
+		if let Some(language) = definition.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
+				.unwrap_or(active_context.default_language.as_deref()) {
 			result.insert("@language".to_string(), language.into());
 		}
 		if let Some(direction) = definition.and_then(|definition| definition.direction_mapping.as_ref())
