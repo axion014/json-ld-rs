@@ -29,7 +29,7 @@ macro_rules! expand_iri {
 
 macro_rules! process_context_iri {
 	($active_context:expr,$value:expr,$local_context:expr,$defined:expr,$options:expr) => {
-		process_context_iri!($active_context, $value, false, false, $local_context, $defined, $options)
+		process_context_iri!($active_context, $value, false, true, $local_context, $defined, $options)
 	};
 	($active_context:expr,$value:expr,$document_relative:expr,$vocab:expr,$local_context:expr,$defined:expr,$options:expr) => {
 		expand_iri(crate::expand::IRIExpansionArguments::DefineTerms {

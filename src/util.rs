@@ -35,7 +35,7 @@ pub fn is_iri(value: &str) -> bool {
 }
 
 pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
-	value[1..].find(":").map(|index| (&value[..index], &value[(index + 1)..]))
+	value[1..].find(":").map(|index| (&value[..(index + 1)], &value[(index + 2)..]))
 }
 
 pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<D>) -> String {

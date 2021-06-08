@@ -38,11 +38,12 @@ pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocu
 	if let Some(LoadDocumentOptions { request_profile, .. }) = options {
 		if !request_profile.is_empty() {
 			accept += ";profile=\"";
-			for request_profile in request_profile {
+			let mut iter = request_profile.iter();
+			accept += iter.next().unwrap();
+			for request_profile in iter {
 				accept += " ";
 				accept += &request_profile;
 			}
-			accept += "\", application/ld+json";
 		}
 	}
 	accept += ", application/json";

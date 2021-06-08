@@ -44,17 +44,21 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 						inner: &JsonLdOptions { frame_expansion, ..(*options.inner).clone() },
 						loaded_contexts: MaybeOwned::Borrowed(&options.loaded_contexts)
 					}, from_map).await?;
-				if let Owned::Array(array) = expanded_item {
-					if definition.and_then(|definition| definition.container_mapping.as_ref())
-							.map_or(false, |container| container.contains("@list")) {
-						let mut object = T::empty_object();
-						object.insert("@list".to_string(), array.into());
-						result.push_back(object.into());
-					} else {
-						result.extend(array);
+				match expanded_item {
+					Owned::Array(array) => {
+						if definition.and_then(|definition| definition.container_mapping.as_ref())
+								.map_or(false, |container| container.contains("@list")) {
+							let mut object = T::empty_object();
+							object.insert("@list".to_string(), array.into());
+							result.push_back(object.into());
+						} else {
+							result.extend(array);
+						}
+					},
+					Owned::Null => {},
+					_ => {
+						result.push_back(expanded_item.into_untyped());
 					}
-				} else {
-					result.push_back(expanded_item.into_untyped());
 				}
 			}
 			Ok(Owned::Array(result))
