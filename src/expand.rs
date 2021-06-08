@@ -15,7 +15,7 @@ use if_chain::if_chain;
 
 use crate::{
 	Context, JsonLdOptions, JsonLdOptionsImpl, LoadDocumentOptions, RemoteDocument,
-	TermDefinition, JsonOrReference, JsonLdProcessingMode, Direction
+	TermDefinition, JsonLdProcessingMode, Direction
 };
 use crate::error::{Result, JsonLdErrorCode::*};
 use crate::util::{
@@ -586,7 +586,8 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 		"@list" => {
 			match active_property {
 				None | Some("@graph") => {},
-				_ => add_value(result, &key, expand_internal(active_context, active_property, value, base_url, options, false).await?.into_untyped(), true)
+				_ => add_value(result, &key, expand_internal(active_context, active_property, value, base_url, options, false)
+					.await?.into_untyped(), true)
 			}
 		},
 		"@set" => {
