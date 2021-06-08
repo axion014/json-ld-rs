@@ -30,27 +30,6 @@ pub use crate::remote::load_remote;
 use crate::remote::LoadDocumentOptions;
 use crate::error::Result;
 
-#[derive(Clone)] pub struct Never<T> { _foo: std::marker::PhantomData<T>, _bar: Inner }
-#[derive(Clone)] enum Inner {}
-
-impl <T> FnOnce<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
-	type Output = Never<T>;
-    extern "rust-call" fn call_once(self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
-}
-
-impl <T> FnMut<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
-    extern "rust-call" fn call_mut(&mut self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
-}
-
-impl <T> Fn<(&str, &Option<LoadDocumentOptions>)> for Never<T> {
-    extern "rust-call" fn call(&self, _: (&str, &Option<LoadDocumentOptions>)) -> Self::Output { unreachable!(); }
-}
-
-impl <T: ForeignMutableJson + BuildableJson> Future for Never<T> {
-	type Output = Result<RemoteDocument<T>>;
-	fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> { unreachable!(); }
-}
-
 #[derive(Clone, Eq, PartialEq)]
 pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
 	JsonObject(Cow<'a, T::Object>),
@@ -210,10 +189,9 @@ pub struct JsonLdOptions<'a, T, F, R> where
 	pub use_rdf_type: bool
 }
 
-impl <'a, T, F, R> Default for JsonLdOptions<'a, T, F, R> where
-	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+type DefaultFuture<T> = std::future::Pending<Result<RemoteDocument<T>>>;
+impl <'a, T> Default for JsonLdOptions<'a, T, fn(&str, &Option<LoadDocumentOptions>) -> DefaultFuture<T>, DefaultFuture<T>> where
+	T: ForeignMutableJson + BuildableJson
 {
 	fn default() -> Self {
 		JsonLdOptions {
@@ -221,6 +199,30 @@ impl <'a, T, F, R> Default for JsonLdOptions<'a, T, F, R> where
 			compact_arrays: true,
 			compact_to_relative: true,
 			document_loader: None,
+			expand_context: None,
+			extract_all_scripts: false,
+			frame_expansion: false,
+			ordered: false,
+			processing_mode: JsonLdProcessingMode::JsonLd1_1,
+			produce_generalized_rdf: true,
+			rdf_direction: None,
+			use_native_types: false,
+			use_rdf_type: false
+		}
+	}
+}
+
+impl <'a, T, F, R> JsonLdOptions<'a, T, F, R> where
+	T: ForeignMutableJson + BuildableJson,
+	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
+	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+{
+	pub fn with_document_loader(document_loader: F) -> Self {
+		JsonLdOptions {
+			base: None,
+			compact_arrays: true,
+			compact_to_relative: true,
+			document_loader: Some(document_loader),
 			expand_context: None,
 			extract_all_scripts: false,
 			frame_expansion: false,
