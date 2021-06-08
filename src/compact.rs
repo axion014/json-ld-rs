@@ -430,7 +430,7 @@ fn get_nest_result<'a, 'b, T>(active_context: &Context<'a, T>, item_active_prope
 	}
 }
 
-fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, options: &JsonLdOptions<T, F, R>,
+pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, options: &JsonLdOptions<T, F, R>,
 		mut value: Option<&T>, vocab: bool, reverse: bool) -> Result<String> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,

@@ -274,16 +274,16 @@ pub mod JsonLdProcessor {
 	use crate::error::{Result, JsonLdErrorCode::{LoadingDocumentFailed, InvalidBaseIRI}};
 	use crate::remote::{self, LoadDocumentOptions};
 	use crate::context::process_context;
-	use crate::compact::compact_internal;
+	use crate::compact::{compact_internal, compact_iri};
 	use crate::expand::expand_internal;
 	use crate::util::map_context;
 
 	use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*};
-	use cc_traits::{Get, Remove, PushBack, Len};
+	use cc_traits::{Get, Remove, PushBack, Len, MapInsert};
 	use url::Url;
 
 	pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
-			options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T> where
+			options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T::Object> where
 		T: ForeignMutableJson + BuildableJson,
 		F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
 		R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
@@ -326,14 +326,48 @@ pub mod JsonLdProcessor {
 			}
 		})?;
 
-		let mut active_context = process_context(&Context::default(), context, context_base.as_ref(),
+		let mut active_context = process_context(&Context::default(), context.clone(), context_base.as_ref(),
 			&options, &mut HashSet::new(), false, true, true).await?;
 		active_context.base_iri = if options.inner.compact_to_relative {
 			context_base
 		} else {
 			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
 		};
-		compact_internal(&mut active_context, None, expanded_input.into(), &options).await
+		let compacted_output = compact_internal(&mut active_context, None, expanded_input.into(), &options).await?;
+		let mut compacted_output = match compacted_output.into_enum() {
+			Owned::Object(object) => object,
+			Owned::Array(array) => {
+				if array.is_empty() {
+					T::empty_object()
+				} else {
+					let mut object = T::empty_object();
+					object.insert(compact_iri(&active_context, "@graph", &options.inner, None, true, false)?, array.into());
+					object
+				}
+			},
+			_ => panic!()
+		};
+		if context.iter().any(|ctx| ctx.as_ref().map_or(false, |ctx| match ctx {
+			JsonOrReference::JsonObject(json) => !json.is_empty(),
+			JsonOrReference::Reference(_) => true
+		})) {
+			let mut context = context.into_iter().map(|ctx| {
+				if let Some(ctx) = ctx {
+					match ctx {
+						JsonOrReference::JsonObject(json) => json.into_owned().into(),
+						JsonOrReference::Reference(iri) => iri.into_owned().into()
+					}
+				} else {
+					T::null()
+				}
+			}).collect::<T::Array>();
+			compacted_output.insert("@context".to_string(), if context.len() == 1 {
+				context.remove(0).unwrap().into()
+			} else {
+				context.into()
+			});
+		}
+		Ok(compacted_output)
 	}
 
 	pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) ->
