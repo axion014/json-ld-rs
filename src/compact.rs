@@ -76,17 +76,8 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 					Cow::Borrowed(active_context)
 				}
 			};
-			if obj.contains("@value") || obj.contains("@id") {
-				let result = compact_value(&active_context, active_property, obj.clone(), options.inner)?;
-				match result.as_enum() {
-					Borrowed::Number(_) | Borrowed::String(_) | Borrowed::Bool(_) | Borrowed::Null => return Ok(result),
-					_ => {
-						if active_property.and_then(|active_property| active_context.term_definitions.get(active_property))
-								.and_then(|definition| definition.type_mapping.as_deref()) == Some("@json") {
-							return Ok(result);
-						}
-					}
-				}
+			if obj.contains("@value") || (obj.contains("@id") && obj.len() == 1) {
+				return compact_value(&active_context, active_property, obj.clone(), options.inner);
 			}
 			if_chain! {
 				if let Some(list) = obj.remove("@list");
@@ -587,15 +578,15 @@ pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, opti
 				preferred_values.push(&type_language_value);
 			}
 		}
-		if type_language_value != "@reverse" { preferred_values.push("@none"); }
+		preferred_values.push("@none");
 		if value.and_then(|value| value.get_attr("@list")).and_then(|list| list.as_array()).map(|list| list.len()) == Some(0) {
 			type_language = "@any";
 		}
 		preferred_values.push("@any");
 		for i in 0..preferred_values.len() {
 			let value = preferred_values[i];
-			if value.contains('_') {
-				preferred_values.push(value);
+			if let Some(index) = value.find('_') {
+				preferred_values.push(&value[index..]);
 			}
 		}
 		let term = select_term(active_context, var, containers, type_language, preferred_values);
@@ -633,7 +624,8 @@ pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, opti
 	}
 	if !vocab {
 		if let Some(base_iri) = active_context.base_iri.as_ref() {
-			return Ok(base_iri.make_relative(&resolve(&var, Some(&base_iri)).unwrap()).unwrap());
+			let var = resolve(&var, Some(&base_iri)).unwrap();
+			return Ok(base_iri.make_relative(&var).unwrap_or(var.to_string()));
 		}
 	}
 	Ok(var.to_string())

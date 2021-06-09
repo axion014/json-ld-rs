@@ -66,7 +66,7 @@ impl Display for JsonLdErrorCode {
 			InvalidBaseDirection => write!(f, "{}", "invalid base direction"),
 			InvalidBaseIRI => write!(f, "invalid base IRI"),
 			InvalidContainerMapping => write!(f, "{}", "invalid container mapping"),
-			InvalidContextEntry => write!(f, "{}", "invalid @context entry"),
+			InvalidContextEntry => write!(f, "{}", "invalid context entry"),
 			InvalidContextNullification => write!(f, "{}", "invalid context nullification"),
 			InvalidDefaultLanguage => write!(f, "{}", "invalid default language"),
 			InvalidIdValue => write!(f, "{}", "invalid @id value"),

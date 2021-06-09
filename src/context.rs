@@ -373,11 +373,18 @@ pub fn create_term_definition<T, F, R>(
 			}
 			if let Some(container) = value.get("@container") {
 				definition.container_mapping = Some(match container.as_enum() {
-					Borrowed::Array(container) => validate_container(
-						container.iter().map(|v| v.as_string().map(|s| s.to_string()).ok_or(err!(InvalidContainerMapping)))
-							.collect::<Result<BTreeSet<String>>>()?
-					)?,
+					Borrowed::Array(container) if options.processing_mode != JsonLdProcessingMode::JsonLd1_0 => {
+						validate_container(
+							container.iter().map(|v| v.as_string().map(|s| s.to_string()).ok_or(err!(InvalidContainerMapping)))
+								.collect::<Result<BTreeSet<String>>>()?
+						)?
+					},
 					Borrowed::String(container) => {
+						if options.processing_mode == JsonLdProcessingMode::JsonLd1_0 {
+							if let "@graph" | "@id" | "@type" = container.as_str() {
+								return Err(err!(InvalidContainerMapping));
+							}
+						}
 						let mut set = BTreeSet::new();
 						set.insert(container.to_owned());
 						validate_container(set)?
