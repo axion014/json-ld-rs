@@ -128,6 +128,8 @@ impl Borrow<str> for TermDefinitionKey {
 	}
 }
 
+type InverseContext = HashMap<String, HashMap<String, HashMap<String, HashMap<String, String>>>>;
+
 #[derive(Clone)]
 pub struct Context<'a, T> where
 	T: ForeignMutableJson + BuildableJson,
@@ -136,7 +138,7 @@ pub struct Context<'a, T> where
 	term_definitions: BTreeMap<TermDefinitionKey, TermDefinition<'a, T>>,
 	base_iri: Option<Url>,
 	original_base_url: Option<Url>,
-	inverse_context: OnceCell<HashMap<String, T>>,
+	inverse_context: OnceCell<InverseContext>,
 	vocabulary_mapping: Option<String>,
 	default_language: Option<String>,
 	default_base_direction: Option<Direction>,

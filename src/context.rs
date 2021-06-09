@@ -3,15 +3,16 @@ use std::future::Future;
 use std::borrow::Cow;
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Object, Array};
-use cc_traits::{Get, GetMut, MapInsert, Remove};
+use cc_traits::{Get, MapInsert, Remove};
 
 use url::Url;
 use async_recursion::async_recursion;
+use hashmap_entry_ownable::std_hash::EntryAPI;
 
 use if_chain::if_chain;
 
 use crate::{
-	Context, OptionalContexts, JsonOrReference, LoadedContext,
+	Context, OptionalContexts, JsonOrReference, LoadedContext, InverseContext,
 	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{
@@ -467,29 +468,30 @@ pub fn create_term_definition<T, F, R>(
 	Ok(())
 }
 
-pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> HashMap<String, T> where
+pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> InverseContext where
 	T: ForeignMutableJson + BuildableJson
 {
-	let mut result = HashMap::<String, T>::new();
+	let mut result = InverseContext::new();
 	for (key, value) in active_context.term_definitions.iter() {
+		let container_map = if let Some(ref iri) = value.iri {
+			result.entry_ownable(iri).or_default()
+		} else {
+			continue;
+		};
 		let key = key.0.as_str();
 		let container = value.container_mapping.as_ref()
 			.map_or_else(|| "@none".to_string(), |container| container.iter().map(|s| s.as_str()).collect());
-		let var = value.iri.as_ref().cloned().unwrap();
-		let container_map = result.entry(var).or_insert_with(|| T::empty_object().into()).as_object_mut().unwrap();
-		if !container_map.contains(&container) {
-			let mut type_language_map = T::empty_object();
-			type_language_map.insert("@language".to_string(), T::empty_object().into());
-			type_language_map.insert("@type".to_string(), T::empty_object().into());
-			let mut any = T::empty_object();
-			any.insert("@none".to_string(), key.into());
-			type_language_map.insert("@any".to_string(), any.into());
-			container_map.insert(container.clone(), type_language_map.into());
-		}
-		let type_language_map = container_map.get_mut(&container).unwrap().as_object_mut().unwrap();
-		let mut insert = |container, key, value: &str| {
-			let map = type_language_map.get_mut(container).unwrap().as_object_mut().unwrap();
-			if !map.contains(key) { map.insert(key.to_string(), value.into()); }
+		let type_language_map = container_map.entry_ownable(&container).or_insert_with(|| {
+			let mut type_language_map = HashMap::new();
+			type_language_map.insert("@language".to_string(), HashMap::new());
+			type_language_map.insert("@type".to_string(), HashMap::new());
+			let mut any = HashMap::new();
+			any.insert("@none".to_string(), key.to_string());
+			type_language_map.insert("@any".to_string(), any);
+			type_language_map
+		});
+		let mut insert = |container, entry: &str, value| {
+			type_language_map.get_mut(container).unwrap().entry_ownable(entry).or_insert_with(|| value.to_string());
 		};
 		if value.reverse_property { insert("@type", "@reverse", key); }
 		match value.type_mapping.as_ref().map(|s| s.as_str()) {
@@ -507,8 +509,8 @@ pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> HashMap
 					insert("@language", "@none", key);
 					insert("@type", "@none", key);
 				}
-				let language_map = type_language_map.get_mut("@language").unwrap().as_object_mut().unwrap();
-				if !language_map.contains(&lang_dir) { language_map.insert(lang_dir, key.into()); }
+				let language_map = type_language_map.get_mut("@language").unwrap();
+				if !language_map.contains(&lang_dir) { language_map.insert(lang_dir, key.to_string()); }
 			}
 		}
 	}
@@ -520,16 +522,16 @@ pub fn select_term<'a: 'b, 'b, T>(active_context: &'b Context<'a, T>,
 	T: ForeignMutableJson + BuildableJson
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));
-	let container_map = inverse_context.get(var).unwrap().as_object().unwrap();
+	let container_map = inverse_context.get(var).unwrap();
 	for container in containers {
 		let type_language_map = match container_map.get(container) {
 			Some(type_language_map) => type_language_map,
 			None => continue
 		};
-		let value_map = type_language_map.get_attr(type_language).unwrap().as_object().unwrap();
+		let value_map = type_language_map.get(type_language).unwrap();
 		for item in preferred_values.iter() {
 			if let Some(term) = value_map.get(item) {
-				return Some(term.as_string().unwrap());
+				return Some(term);
 			}
 		}
 	}
