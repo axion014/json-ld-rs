@@ -250,29 +250,23 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 			let compacted_item = compact_internal(active_context, Some(&item_active_property),
 				expanded_item.remove("@graph").unwrap(), options).await?;
 			if container.contains("@graph") && container.contains("@id") {
-				let mut new_map_object = None;
-				let map_object = nest_result.get_mut(&item_active_property).map_or_else(|| {
-					new_map_object = Some(T::empty_object());
-					new_map_object.as_mut().unwrap()
-				}, |map_object| map_object.as_object_mut().unwrap());
+				let map_object = nest_result.get_mut(&item_active_property);
+				let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
+					nest_result.insert(item_active_property.clone(), T::empty_object().into());
+					nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
+				};
 				let id = expanded_item.get("@id").map(|id| id.as_string().unwrap());
 				let map_key = compact_iri(active_context, id.unwrap_or("@none"), options.inner, None, id.is_none(), false)?;
 				add_value(map_object, &map_key, compacted_item, as_array);
-				if let Some(new_map_object) = new_map_object {
-					nest_result.insert(item_active_property, new_map_object.into());
-				}
 			} else if container.contains("@graph") && !expanded_item.contains("@id") {
 				if container.contains("@index") {
-					let mut new_map_object = None;
-					let map_object = nest_result.get_mut(&item_active_property).map_or_else(|| {
-						new_map_object = Some(T::empty_object());
-						new_map_object.as_mut().unwrap()
-					}, |map_object| map_object.as_object_mut().unwrap());
+					let map_object = nest_result.get_mut(&item_active_property);
+					let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
+						nest_result.insert(item_active_property.clone(), T::empty_object().into());
+						nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
+					};
 					let map_key = expanded_item.get("@index").map_or("@none", |index| index.as_string().unwrap());
 					add_value(map_object, map_key, compacted_item, as_array);
-					if let Some(new_map_object) = new_map_object {
-						nest_result.insert(item_active_property, new_map_object.into());
-					}
 				} else {
 					let compacted_item = if_chain! {
 						if let Some(array) = compacted_item.as_array();
@@ -328,11 +322,11 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 		if let Some(container) = container.get("@language").or_else(|| container.get("@index"))
 			.or_else(|| container.get("@id")).or_else(|| container.get("@type"));
 		then {
-			let mut new_map_object = None;
-			let map_object = nest_result.get_mut(&item_active_property).map_or_else(|| {
-				new_map_object = Some(T::empty_object());
-				new_map_object.as_mut().unwrap()
-			}, |map_object| map_object.as_object_mut().unwrap());
+			let map_object = nest_result.get_mut(&item_active_property);
+			let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
+				nest_result.insert(item_active_property.clone(), T::empty_object().into());
+				nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
+			};
 			let container_key = compact_iri(active_context, container, options.inner, None, true, false)?;
 			match container.as_str() {
 				"@language" => {
