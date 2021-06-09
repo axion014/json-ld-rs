@@ -18,7 +18,7 @@ use url::Url;
 #[macro_use]
 mod macros;
 
-mod error;
+pub mod error;
 mod remote;
 mod context;
 mod compact;
@@ -43,7 +43,7 @@ pub enum Document<T: ForeignMutableJson + BuildableJson> {
 }
 
 impl <T: ForeignMutableJson + BuildableJson> Document<T> {
-	fn to_parsed(self) -> std::result::Result<T, T::Err> {
+	pub fn to_parsed(self) -> std::result::Result<T, T::Err> {
 		match self {
 			Document::ParsedJson(v) => Ok(v),
 			Document::RawJson(v) => T::from_str(&v)
@@ -193,7 +193,9 @@ pub struct JsonLdOptions<'a, T, F, R> where
 }
 
 type DefaultFuture<T> = std::future::Pending<Result<RemoteDocument<T>>>;
-impl <'a, T> Default for JsonLdOptions<'a, T, fn(&str, &Option<LoadDocumentOptions>) -> DefaultFuture<T>, DefaultFuture<T>> where
+pub type JsonLdOptionsWithoutDocumentLoader<'a, T> =
+	JsonLdOptions<'a, T, fn(&str, &Option<LoadDocumentOptions>) -> DefaultFuture<T>, DefaultFuture<T>>;
+impl <'a, T> Default for JsonLdOptionsWithoutDocumentLoader<'a, T> where
 	T: ForeignMutableJson + BuildableJson
 {
 	fn default() -> Self {
