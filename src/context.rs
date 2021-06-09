@@ -490,27 +490,26 @@ pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> Inverse
 			type_language_map.insert("@any".to_string(), any);
 			type_language_map
 		});
-		let mut insert = |container, entry: &str, value| {
-			type_language_map.get_mut(container).unwrap().entry_ownable(entry).or_insert_with(|| value.to_string());
+		let mut insert = |container, entry: &str| {
+			type_language_map.get_mut(container).unwrap().entry_ownable(entry).or_insert_with(|| key.to_string());
 		};
-		if value.reverse_property { insert("@type", "@reverse", key); }
+		if value.reverse_property { insert("@type", "@reverse"); }
 		match value.type_mapping.as_ref().map(|s| s.as_str()) {
 			Some("@none") => {
-				insert("@language", "@any", key);
-				insert("@type", "@any", key);
+				insert("@language", "@any");
+				insert("@type", "@any");
 			},
-			Some(type_mapping) => insert("@type", type_mapping, key),
+			Some(type_mapping) => insert("@type", type_mapping),
 			None => {
 				let mut lang_dir = make_lang_dir(value.language_mapping.as_ref().cloned()
 					.map(|lang| lang.unwrap_or_else(|| "@null".to_string())), value.direction_mapping.as_ref());
 				if lang_dir == "" {
 					lang_dir = make_lang_dir(active_context.default_language.as_ref().cloned(),
 						active_context.default_base_direction.as_ref());
-					insert("@language", "@none", key);
-					insert("@type", "@none", key);
+					insert("@language", "@none");
+					insert("@type", "@none");
 				}
-				let language_map = type_language_map.get_mut("@language").unwrap();
-				if !language_map.contains(&lang_dir) { language_map.insert(lang_dir, key.to_string()); }
+				insert("@language", &lang_dir);
 			}
 		}
 	}
@@ -523,17 +522,9 @@ pub fn select_term<'a: 'b, 'b, T>(active_context: &'b Context<'a, T>,
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));
 	let container_map = inverse_context.get(var).unwrap();
-	for container in containers {
-		let type_language_map = match container_map.get(container) {
-			Some(type_language_map) => type_language_map,
-			None => continue
-		};
-		let value_map = type_language_map.get(type_language).unwrap();
-		for item in preferred_values.iter() {
-			if let Some(term) = value_map.get(item) {
-				return Some(term);
-			}
-		}
-	}
-	None
+	// dbg!(container_map, type_language, &preferred_values);
+	containers.iter().filter_map(|container| container_map.get(*container))
+		.map(|type_language_map| type_language_map.get(type_language).unwrap())
+		.find_map(|value_map| preferred_values.iter()
+			.find_map(|preferred_value| value_map.get(*preferred_value).map(|s| s.as_str())))
 }

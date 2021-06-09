@@ -142,8 +142,8 @@ async fn compact_map<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_
 			},
 			"@type" => {
 				let compacted_value: T = match expanded_value.as_enum() {
-					Borrowed::String(expanded_value) => {
-						compact_iri(type_scoped_context, expanded_value, options.inner, None, true, false)?.into()
+					Borrowed::String(expanded_type) => {
+						compact_iri(type_scoped_context, expanded_type, options.inner, None, true, false)?.into()
 					},
 					Borrowed::Array(type_array) => {
 						let mut compacted_value = T::empty_array();
@@ -204,8 +204,8 @@ async fn compact_map<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_
 					for expanded_item in expanded_value_array.into_iter() {
 						let item_active_property = compact_iri(active_context, expanded_property.as_str(), options.inner,
 							Some(&expanded_item), true, active_property == Some("@reverse"))?;
-						let mut nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
-						compact_item(active_context, item_active_property, &mut nest_result, expanded_item, options).await?;
+						let nest_result = get_nest_result(active_context, &item_active_property, &mut result)?;
+						compact_item(active_context, item_active_property, nest_result, expanded_item, options).await?;
 					}
 				}
 			}
@@ -328,47 +328,38 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 				nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
 			};
 			let container_key = compact_iri(active_context, container, options.inner, None, true, false)?;
-			match container.as_str() {
-				"@language" => {
-					if_chain! {
-						if let Some(expanded_item) = expanded_item.as_object_mut();
-						if let Some(value) = expanded_item.remove("@value");
-						then {
-							let map_key = expanded_item.get("@language").map_or("@none", |lang| lang.as_string().unwrap());
-							add_value(map_object, map_key, value, as_array);
-						} else {
-							add_value(map_object, "@none", compacted_item, as_array);
-						}
-					}
-				},
-				"@index" => {
-					if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
-							.and_then(|definition| definition.index_mapping.as_ref().cloned()) {
-						let container_key = compact_iri(active_context, &index_key, options.inner, None, true, false)?;
-						let map_key = compacted_item.as_object_mut()
-							.and_then(|compacted_item| compacted_item.remove(&container_key).map(|index| (compacted_item, index)))
-							.and_then(|(compacted_item, index)| {
-								if index.as_array().is_some() {
-									let mut index = index.into_array().unwrap().into_iter();
-									let ret = index.next().map(|map_key| Cow::Owned(map_key.into_string().unwrap()));
-									for value in index { add_value(compacted_item, &container_key, value, false); }
-									ret
-								} else {
-									index.into_string().map(Cow::from)
-								}
-							}).unwrap_or(Cow::Borrowed("@none"));
-						add_value(map_object, &map_key, compacted_item, as_array);
+			let map_key = match container.as_str() {
+				"@language" => Cow::Borrowed(if_chain! {
+					if let Some(expanded_item) = expanded_item.as_object_mut();
+					if let Some(value) = expanded_item.remove("@value");
+					then {
+						compacted_item = value;
+						expanded_item.get("@language").map_or("@none", |lang| lang.as_string().unwrap())
 					} else {
-						let map_key = expanded_item.get_attr("@index").map_or("@none", |index| index.as_string().unwrap());
-						add_value(map_object, map_key, compacted_item, as_array);
+						"@none"
 					}
+				}),
+				"@index" => if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
+								.and_then(|definition| definition.index_mapping.as_ref().cloned()) {
+					let container_key = compact_iri(active_context, &index_key, options.inner, None, true, false)?;
+					compacted_item.as_object_mut()
+						.and_then(|compacted_item| compacted_item.remove(&container_key).map(|index| (compacted_item, index)))
+						.and_then(|(compacted_item, index)| {
+							if index.as_array().is_some() {
+								let mut index = index.into_array().unwrap().into_iter();
+								let ret = index.next().map(|map_key| Cow::Owned(map_key.into_string().unwrap()));
+								for value in index { add_value(compacted_item, &container_key, value, false); }
+								ret
+							} else {
+								index.into_string().map(Cow::from)
+							}
+						}).unwrap_or(Cow::Borrowed("@none"))
+				} else {
+					Cow::Borrowed(expanded_item.get_attr("@index").map_or("@none", |index| index.as_string().unwrap()))
 				},
-				"@id" => {
-					let map_key = compacted_item.as_object_mut()
-						.and_then(|compacted_item| compacted_item.remove(&container_key))
-						.map_or(Cow::Borrowed("@none"), |map_key| Cow::Owned(map_key.into_string().unwrap()));
-					add_value(map_object, &map_key, compacted_item, as_array);
-				},
+				"@id" => compacted_item.as_object_mut()
+					.and_then(|compacted_item| compacted_item.remove(&container_key))
+					.map_or(Cow::Borrowed("@none"), |map_key| Cow::Owned(map_key.into_string().unwrap())),
 				"@type" => {
 					let map_key = compacted_item.as_object_mut()
 						.and_then(|compacted_item| compacted_item.remove(&container_key).map(|ty| (compacted_item, ty)))
@@ -387,18 +378,17 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 								expand_iri!(active_context, compacted_item.iter().next().unwrap().0)?.as_deref() == Some("@id")))? {
 						let mut element = T::empty_object();
 						element.insert("@id".to_string(), expanded_item.into_object().unwrap().remove("@id").unwrap_or_else(|| T::null()));
-						let compacted_item = compact_internal(active_context, Some(&item_active_property), element.into(),
+						compacted_item = compact_internal(active_context, Some(&item_active_property), element.into(),
 							&JsonLdOptionsImpl {
 								inner: &JsonLdOptions { compact_arrays: false, ordered: false, ..(*options.inner).clone() },
 								loaded_contexts: MaybeOwned::Borrowed(&options.loaded_contexts)
 							}).await?;
-						add_value(map_object, &map_key, compacted_item, as_array);
-					} else {
-						add_value(map_object, &map_key, compacted_item, as_array);
 					}
+					map_key
 				},
 				_ => { unreachable!() }
-			}
+			};
+			add_value(map_object, &map_key, compacted_item, as_array);
 		} else {
 			add_value(nest_result, &item_active_property, compacted_item, as_array);
 		}
@@ -578,8 +568,8 @@ pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, opti
 		let mut preferred_values = Vec::new();
 		if type_language_value == "@reverse" { preferred_values.push("@reverse"); }
 		if_chain! {
-			if type_language_value == "@id" || type_language_value == "@reverse";
-			if let Some(id) = value.and_then(|value| value.get_attr("@id")).map(|value| value.as_string().unwrap());
+			if let "@id" | "@reverse" = type_language_value.as_str();
+			if let Some(id) = value.and_then(|value| value.get_attr("@id")).map(|id| id.as_string().unwrap());
 			then {
 				let result = compact_iri(active_context, id, options, None, true, false)?;
 				if_chain! {
@@ -609,7 +599,7 @@ pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, opti
 			}
 		}
 		let term = select_term(active_context, var, containers, type_language, preferred_values);
-		if term.is_some() { return Ok(term.unwrap().to_string()); }
+		if let Some(term) = term { return Ok(term.to_string()); }
 	}
 	if_chain! {
 		if vocab;
