@@ -6,7 +6,7 @@ use cc_traits::{Get, GetMut, MapInsert, PushBack, Remove};
 
 use url::{Url, ParseError};
 
-use crate::{JsonLdContext, JsonOrReference};
+use crate::{OptionalContexts, JsonOrReference};
 use crate::error::{JsonLdError, JsonLdErrorCode::InvalidContextEntry};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
@@ -83,7 +83,7 @@ pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, 
 	}
 }
 
-pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -> Result<JsonLdContext<'a, T>, JsonLdError> {
+pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -> Result<OptionalContexts<'a, T>, JsonLdError> {
 	match ctx {
 		Cow::Owned(ctx) => match ctx.into_enum() {
 			Owned::Array(ctx) => ctx.into_iter().map(|value| Ok(match value.into_enum() {
@@ -92,7 +92,7 @@ pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -
 				Owned::String(reference) => Some(JsonOrReference::Reference(Cow::Owned(reference))),
 				Owned::Null => None,
 				_ => return Err(err!(InvalidContextEntry))
-			})).collect::<Result<JsonLdContext<'a, T>, JsonLdError>>(),
+			})).collect(),
 			Owned::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Owned(ctx)))]),
 			Owned::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Owned(reference)))]),
 			Owned::Null => Ok(vec![None]),
@@ -105,7 +105,7 @@ pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -
 				Borrowed::String(reference) => Some(JsonOrReference::Reference(Cow::Borrowed(reference))),
 				Borrowed::Null => None,
 				_ => return Err(err!(InvalidContextEntry))
-			})).collect::<Result<JsonLdContext<'a, T>, JsonLdError>>(),
+			})).collect(),
 			Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(ctx)))]),
 			Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(reference)))]),
 			Borrowed::Null => Ok(vec![None]),

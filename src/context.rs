@@ -11,7 +11,7 @@ use async_recursion::async_recursion;
 use if_chain::if_chain;
 
 use crate::{
-	Context, JsonLdContext, JsonOrReference, LoadedContext,
+	Context, OptionalContexts, JsonOrReference, LoadedContext,
 	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{
@@ -65,7 +65,7 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 
 #[async_recursion(?Send)]
 pub async fn process_context<'a, 'b, T, F, R>(
-		active_context: &'b Context<'a, T>, local_context: JsonLdContext<'a, T>, base_url: Option<&'b Url>,
+		active_context: &'b Context<'a, T>, local_context: OptionalContexts<'a, T>, base_url: Option<&'b Url>,
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &mut HashSet<Url>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,

@@ -67,7 +67,8 @@ pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 	RemoteDocument(RemoteDocument<T>),
 }
 
-type JsonLdContext<'a, T> = Vec<Option<JsonOrReference<'a, T>>>;
+type JsonLdContext<'a, T> = Vec<JsonOrReference<'a, T>>;
+type OptionalContexts<'a, T> = Vec<Option<JsonOrReference<'a, T>>>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Direction {
@@ -314,7 +315,7 @@ pub mod JsonLdProcessor {
 		// If context is a map having an @context entry, set context to that entry's value
 		let context = ctx.map_or(Ok(vec![None]), |mut contexts| {
 			if contexts.len() == 1 {
-				match contexts.remove(0).unwrap() {
+				match contexts.remove(0) {
 					JsonOrReference::JsonObject(mut json) => match json {
 						Cow::Owned(ref mut json) => json.remove("@context").map(|json| map_context(Cow::Owned(json))),
 						Cow::Borrowed(json) => json.get("@context").map(|json| map_context(Cow::Borrowed(json)))
@@ -322,7 +323,7 @@ pub mod JsonLdProcessor {
 					JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri))])
 				}
 			} else {
-				Ok(contexts)
+				Ok(contexts.into_iter().map(|ctx| Some(ctx)).collect())
 			}
 		})?;
 
