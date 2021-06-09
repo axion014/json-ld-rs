@@ -38,6 +38,11 @@ pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
 	value[1..].find(":").map(|index| (&value[..(index + 1)], &value[(index + 2)..]))
 }
 
+#[test]
+fn test_as_compact_iri() {
+	assert_eq!(as_compact_iri("prefix:suffix"), Some(("prefix", "suffix")));
+}
+
 pub fn make_lang_dir<D: AsRef<str>>(language: Option<String>, direction: Option<D>) -> String {
 	let language = language.map_or_else(|| "".to_string(), |language| language.to_ascii_lowercase());
 	let direction = direction.as_ref().map_or("", |direction| direction.as_ref());
