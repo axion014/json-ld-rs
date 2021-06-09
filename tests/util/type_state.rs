@@ -24,24 +24,24 @@ impl TypeState {
 		let new_self = match self {
 			Self::Initial => {
 				match ty {
-					"mf:Manifest" => Self::Manifest,
-					"jld:PositiveEvaluationTest" => Self::TestType(TestType::PositiveEvaluationTest),
-					"jld:NegativeEvaluationTest" => Self::TestType(TestType::NegativeEvaluationTest),
-					"jld:CompactTest" => Self::TestClass(TestClass::CompactTest),
+					"http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#Manifest" => Self::Manifest,
+					"https://w3c.github.io/json-ld-api/tests/vocab#PositiveEvaluationTest" => Self::TestType(TestType::PositiveEvaluationTest),
+					"https://w3c.github.io/json-ld-api/tests/vocab#NegativeEvaluationTest" => Self::TestType(TestType::NegativeEvaluationTest),
+					"https://w3c.github.io/json-ld-api/tests/vocab#CompactTest" => Self::TestClass(TestClass::CompactTest),
 					_ => return
 				}
 			},
 			Self::TestType(test_type) => {
 				match ty {
-					"jld:CompactTest" => Self::Test(*test_type, TestClass::CompactTest),
-					"jld:ExpandTest" => Self::Test(*test_type, TestClass::ExpandTest),
+					"https://w3c.github.io/json-ld-api/tests/vocab#CompactTest" => Self::Test(*test_type, TestClass::CompactTest),
+					"https://w3c.github.io/json-ld-api/tests/vocab#ExpandTest" => Self::Test(*test_type, TestClass::ExpandTest),
 					_ => return
 				}
 			},
 			Self::TestClass(test_class) => {
 				match ty {
-					"jld:PositiveEvaluationTest" => Self::Test(TestType::PositiveEvaluationTest, *test_class),
-					"jld:NegativeEvaluationTest" => Self::Test(TestType::NegativeEvaluationTest, *test_class),
+					"https://w3c.github.io/json-ld-api/tests/vocab#PositiveEvaluationTest" => Self::Test(TestType::PositiveEvaluationTest, *test_class),
+					"https://w3c.github.io/json-ld-api/tests/vocab#NegativeEvaluationTest" => Self::Test(TestType::NegativeEvaluationTest, *test_class),
 					_ => return
 				}
 			},
