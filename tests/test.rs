@@ -81,7 +81,6 @@ async fn evaluate_typed_object(value: Map<String, Value>, types: &[Value], mut s
 		match state {
 			TypeState::Manifest => evaluate_manifest(value, record, base, depth).await?,
 			TypeState::Test(test_type, test_class) => evaluate_test(value, test_type, test_class, record, base, depth).await?,
-			TypeState::Initial => (),
 			_ => panic!("unexpected end of @type types")
 		}
 	}
@@ -124,20 +123,21 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass,
 		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
-		.ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
+		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
 	let input = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#action")
 		.and_then(|v| v.pointer("/0/@id")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid input"))?;
 	let input = JsonLdInput::<Value>::Reference(Url::options().base_url(
-		base.as_ref()).parse(input).map_err(|_| JsonLdTestError::InvalidManifest("invalid input"))?.to_string());
+		base.as_ref()).parse(input).map_err(|_| JsonLdTestError::InvalidManifest("invalid input url"))?.to_string());
 	let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
-		.and_then(|v| v.pointer("/0/@id")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
+		.and_then(|v| v.pointer(if let TestType::PositiveEvaluationTest = test_type { "/0/@id" } else { "/0/@value" }))
+		.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
 	let options = evaluate_option(value.get("https://w3c.github.io/json-ld-api/tests/vocab#option"))?;
 	let output = match test_class {
 		TestClass::CompactTest => {
 			let context = value.get("https://w3c.github.io/json-ld-api/tests/vocab#context")
 				.and_then(|v| v.pointer("/0/@id")).and_then(|context| context.as_str())
 				.map(|context| Url::options().base_url(base.as_ref()).parse(context))
-				.ok_or(JsonLdTestError::InvalidManifest("invalid context"))?.map_err(|_| JsonLdTestError::InvalidManifest("invalid context"))?;
+				.ok_or(JsonLdTestError::InvalidManifest("invalid context"))?.map_err(|_| JsonLdTestError::InvalidManifest("invalid context url"))?;
 			let context = load_remote(context.as_str(),
 				&JsonLdOptions::default(), None, vec![]).await
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
@@ -159,25 +159,26 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		TestClass::ExpandTest => {
 			std::panic::AssertUnwindSafe(expand(&input, &options)).catch_unwind().await
 				.map(|output| output.map(|output| Value::Array(output)))
-		}
+		},
+		_ => return Ok(())
 	};
 	match output {
 		Ok(output) => match output {
 			Ok(output) => {
 				if let TestType::PositiveEvaluationTest = test_type {
 					let target = load_remote(
-						Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target"))?.as_str(),
+						Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target url"))?.as_str(),
 						&JsonLdOptions::default(), None, vec![]).await
 						.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
 						.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
 					if json_ld_eq(&output, &target, false) {
 						record.pass += 1;
 					} else {
-						eprintln!("{}Assert failed at test `{}`: {} != {}", "    ".repeat(depth), name, output, target);
+						eprintln!("{}Assert failed at test {}: {} != {}", "    ".repeat(depth), name, output, target);
 						record.fail += 1;
 					}
 				} else {
-					eprintln!("{}Assert failed at test `{}`: expected {}, {}", "    ".repeat(depth), name, target, output);
+					eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, output);
 					record.fail += 1;
 				}
 			},
@@ -186,20 +187,20 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 					if &err.code.to_string() == target {
 						record.pass += 1;
 					} else {
-						eprintln!("{}Assert failed at test `{}`: expected {}, {}", "    ".repeat(depth), name, target, err.code);
+						eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, err.code);
 						record.fail += 1;
 					}
 				} else {
-					eprintln!("{}Error at test `{}`: {}", "    ".repeat(depth), name, err);
+					eprintln!("{}Error at test {}: {}", "    ".repeat(depth), name, err);
 					record.fail += 1;
 				}
 			}
 		},
 		Err(panic) => {
 			if let Some(s) = panic.downcast_ref::<&str>() {
-				eprintln!("{}Testing `{}`: {}", "    ".repeat(depth), name, s);
+				eprintln!("{}Testing {}: {}", "    ".repeat(depth), name, s);
 			} else {
-				eprintln!("A panic occurred at test `{}`", name);
+				eprintln!("A panic occurred at test {}", name);
 			}
 			record.fail += 1;
 		}
