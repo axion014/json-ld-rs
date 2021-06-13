@@ -432,6 +432,8 @@ pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<Json
 	})
 }
 
+/*
+
 pub async fn flatten<'a, T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLdContext<'_, T>>,
 		options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T> where
 	T: ForeignMutableJson + BuildableJson,
@@ -441,13 +443,12 @@ pub async fn flatten<'a, T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLd
 	todo!()
 }
 
-/*
 pub async fn frame() {
-
+	todo!()
 }
 
 pub async fn from_rdf(input: RdfDataset, options: JsonLdOptions) -> dyn ExactSizeIterator<Item = dyn JsonType> {
-
+	todo!()
 }
 
 pub async fn to_rdf(input: JsonLdInput, options: JsonLdOptions) -> RdfDataset {

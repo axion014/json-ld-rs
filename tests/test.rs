@@ -122,7 +122,7 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 	Ok(())
 }
 
-async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, is_html: bool,
+async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, _is_html: bool,
 		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
