@@ -73,18 +73,18 @@ async fn evaluate_typed_object(value: Map<String, Value>, types: &[Value], mut s
 	if let Some(ty) = types.get(0) {
 		if let Some(ty) = ty.as_str() {
 			state.register(ty);
-			evaluate_typed_object(value, &types[1..], state, record, base, depth).await?;
+			evaluate_typed_object(value, &types[1..], state, record, base, depth).await
 		} else {
-			panic!("invalid @type value: {}", ty);
+			panic!("invalid @type value: {}", ty)
 		}
 	} else {
 		match state {
-			TypeState::Manifest => evaluate_manifest(value, record, base, depth).await?,
-			TypeState::Test(test_type, test_class) => evaluate_test(value, test_type, test_class, record, base, depth).await?,
+			TypeState::Manifest => evaluate_manifest(value, record, base, depth).await,
+			TypeState::Test(Some(test_type), Some(test_class), is_html) =>
+				Ok(evaluate_test(value, test_type, test_class, is_html, record, base, depth).await?),
 			_ => panic!("unexpected end of @type types")
 		}
 	}
-	Ok(())
 }
 
 #[async_recursion(?Send)]
@@ -120,7 +120,7 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 	Ok(())
 }
 
-async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass,
+async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, is_html: bool,
 		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
@@ -128,9 +128,6 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		.and_then(|v| v.pointer("/0/@id")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid input"))?;
 	let input = JsonLdInput::<Value>::Reference(Url::options().base_url(
 		base.as_ref()).parse(input).map_err(|_| JsonLdTestError::InvalidManifest("invalid input url"))?.to_string());
-	let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
-		.and_then(|v| v.pointer(if let TestType::PositiveEvaluationTest = test_type { "/0/@id" } else { "/0/@value" }))
-		.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
 	let options = evaluate_option(value.get("https://w3c.github.io/json-ld-api/tests/vocab#option"))?;
 	let output = match test_class {
 		TestClass::CompactTest => {
@@ -165,34 +162,55 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 	match output {
 		Ok(output) => match output {
 			Ok(output) => {
-				if let TestType::PositiveEvaluationTest = test_type {
-					let target = load_remote(
-						Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target url"))?.as_str(),
-						&JsonLdOptions::default(), None, vec![]).await
-						.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
-						.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
-					if json_ld_eq(&output, &target, false) {
-						record.pass += 1;
-					} else {
-						eprintln!("{}Assert failed at test {}: {} != {}", "    ".repeat(depth), name, output, target);
+				match test_type {
+					TestType::PositiveEvaluationTest => {
+						let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
+							.and_then(|v| v.pointer("/0/@id"))
+							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
+						let target = load_remote(
+							Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target url"))?.as_str(),
+							&JsonLdOptions::default(), None, vec![]).await
+							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
+							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
+						if json_ld_eq(&output, &target, false) {
+							record.pass += 1;
+						} else {
+							eprintln!("{}Assert failed at test {}: {} != {}", "    ".repeat(depth), name, output, target);
+							record.fail += 1;
+						}
+					},
+					TestType::PositiveSyntaxTest => record.pass += 1,
+					TestType::NegativeEvaluationTest => {
+						let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
+							.and_then(|v| v.pointer("/0/@value"))
+							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
+						eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, output);
+						record.fail += 1;
+					},
+					TestType::NegativeSyntaxTest => {
+						eprintln!("{}Assert failed at test {}: expected an error, {}", "    ".repeat(depth), name, output);
 						record.fail += 1;
 					}
-				} else {
-					eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, output);
-					record.fail += 1;
 				}
 			},
 			Err(err) => {
-				if let TestType::NegativeEvaluationTest = test_type {
-					if &err.code.to_string() == target {
-						record.pass += 1;
-					} else {
-						eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, err.code);
+				match test_type {
+					TestType::NegativeEvaluationTest => {
+						let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
+							.and_then(|v| v.pointer("/0/@value"))
+							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
+						if &err.code.to_string() == target {
+							record.pass += 1;
+						} else {
+							eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, err.code);
+							record.fail += 1;
+						}
+					},
+					TestType::NegativeSyntaxTest => record.pass += 1,
+					_ => {
+						eprintln!("{}Error at test {}: {}", "    ".repeat(depth), name, err);
 						record.fail += 1;
 					}
-				} else {
-					eprintln!("{}Error at test {}: {}", "    ".repeat(depth), name, err);
-					record.fail += 1;
 				}
 			}
 		},
