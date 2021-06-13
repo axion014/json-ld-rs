@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet};
+use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
 
 use json_trait::{ForeignMutableJson, BuildableJson, typed_json::{self, *}, Object, Array, MutableObject};
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Len, Remove};
 
+use elsa::FrozenSet;
 use maybe_owned::MaybeOwned;
 
 use async_recursion::async_recursion;
@@ -79,13 +80,13 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			});
 			if let Some(property_scoped_context) = property_scoped_context {
 				active_context = Cow::Owned(process_context(&active_context, vec![Some(property_scoped_context.clone())],
-					definition.unwrap().base_url.as_ref(), options, &mut HashSet::new(), true, true, true).await?);
+					definition.unwrap().base_url.as_ref(), options, &FrozenSet::new(), true, true, true).await?);
 			}
 			let mut obj = obj.into_iter().collect::<BTreeMap<_, _>>();
 			if let Some(context) = obj.remove("@context") {
 				active_context = Cow::Owned(process_context(&active_context,
 					map_context(Cow::Owned(context))?,
-					base_url, options, &mut HashSet::new(), false, true, true).await?);
+					base_url, options, &FrozenSet::new(), false, true, true).await?);
 			}
 			let type_scoped_context = active_context.clone();
 			let mut input_type = None;
@@ -105,14 +106,14 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 								}).collect::<Result<BTreeMap<_, _>>>()? {
 							active_context = Cow::Owned(process_context(&active_context, vec![Some((*context).clone())],
 								active_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
-								options, &mut HashSet::new(), false, false, true).await?);
+								options, &FrozenSet::new(), false, false, true).await?);
 						}
 					} else if let Some(term) = value.as_string() {
 						input_type = expand_iri!(&active_context, term)?;
 						if let Some(context) = type_scoped_context.term_definitions.get(term).and_then(|definition| definition.context.as_ref()) {
 							active_context = Cow::Owned(process_context(&active_context, vec![Some((*context).clone())],
 								active_context.term_definitions.get(term).unwrap().base_url.as_ref(),
-								options, &mut HashSet::new(), false, false, true).await?);
+								options, &FrozenSet::new(), false, false, true).await?);
 						}
 					}
 				}
@@ -173,7 +174,7 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			if active_property.is_none() || active_property == Some("@graph") { return Ok(Owned::Null) }
 			Ok(Owned::Object(if let Some(property_scoped_context) = property_scoped_context {
 				expand_value(&process_context(active_context, vec![Some(property_scoped_context.clone())],
-					definition.unwrap().base_url.as_ref(), options, &mut HashSet::new(), false, true, true).await?,
+					definition.unwrap().base_url.as_ref(), options, &FrozenSet::new(), false, true, true).await?,
 					definition, value)?
 			} else {
 				expand_value(active_context, definition, value)?
@@ -380,7 +381,7 @@ async fn expand_index_map<T, F, R>(map_context: &Context<'_, T>, key: &str, inde
 			if let Some(ref context) = definition.context;
 			then {
 				Cow::Owned(process_context(&map_context, vec![Some(context.clone())], definition.base_url.as_ref(),
-					options, &mut HashSet::new(), false, true, true).await?)
+					options, &FrozenSet::new(), false, true, true).await?)
 			} else {
 				Cow::Borrowed(map_context)
 			}

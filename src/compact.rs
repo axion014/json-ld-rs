@@ -1,10 +1,11 @@
-use std::collections::{HashSet, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
 
 use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object, MutableObject};
 use cc_traits::{Get, GetMut, Len, PushBack, Remove, MapInsert};
 
+use elsa::FrozenSet;
 use maybe_owned::MaybeOwned;
 
 use async_recursion::async_recursion;
@@ -71,7 +72,7 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 				if let Some(context) = term_definition.context.as_ref();
 				then {
 					Cow::Owned(process_context(active_context, vec![Some(context.clone())], term_definition.base_url.as_ref(),
-						options, &mut HashSet::new(), true, false, true).await?)
+						options, &FrozenSet::new(), true, false, true).await?)
 				} else {
 					Cow::Borrowed(active_context)
 				}
@@ -97,7 +98,7 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 					if let Some(TermDefinition { context: Some(local_context), base_url, .. }) =
 							type_scoped_context.term_definitions.get(term.as_str()) {
 						active_context = Cow::Owned(process_context(&mut active_context, vec![Some(local_context.clone())], base_url.as_ref(),
-							options, &mut HashSet::new(), false, false, true).await?);
+							options, &FrozenSet::new(), false, false, true).await?);
 					}
 				}
 			}

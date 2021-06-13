@@ -1,6 +1,10 @@
-use std::collections::{HashMap, HashSet, BTreeSet};
+use std::collections::{HashMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
+
+use elsa::FrozenSet;
+
+use futures::{future, stream, StreamExt, TryStreamExt};
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Object, Array};
 use cc_traits::{Get, MapInsert, Remove};
@@ -67,7 +71,7 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 #[async_recursion(?Send)]
 pub async fn process_context<'a, 'b, T, F, R>(
 		active_context: &'b Context<'a, T>, local_context: OptionalContexts<'a, T>, base_url: Option<&'b Url>,
-		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &mut HashSet<Url>, override_protected: bool,
+		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
@@ -84,138 +88,140 @@ pub async fn process_context<'a, 'b, T, F, R>(
 	if propagate == false && result.previous_context.is_none() {
 		result.previous_context = Some(Box::new(active_context.clone()));
 	}
-	for context in local_context {
-		if let Some(context) = context {
-			match context {
-				JsonOrReference::Reference(iri) => {
-					let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
-					if validate_scoped_context == false && remote_contexts.contains(&context) { continue; }
-					if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
-					remote_contexts.insert(context.clone());
-					let loaded_context = if let Some(loaded_context) = options.loaded_contexts.get(&context) {
-						loaded_context
-					} else {
-						let context_document = load_remote(context.as_str(), options.inner,
-								Some("http://www.w3.org/ns/json-ld#context".to_string()),
-								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
-							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
-						let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
-						let loaded_context = context_document.document.to_parsed()
-							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?
-							.as_object_mut()
-							.and_then(|obj| obj.remove("@context"))
-							.and_then(|ctx| ctx.into_object())
-							.ok_or(err!(InvalidRemoteContext))?;
-						options.loaded_contexts.insert(context, Box::new(LoadedContext { context: loaded_context, base_url }))
-					};
-					result = process_context(&mut result, vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&loaded_context.context)))],
-						Some(&loaded_context.base_url), options, remote_contexts, false, true, validate_scoped_context).await?;
-				},
-				JsonOrReference::JsonObject(mut json) => {
-					if let Some(version) = json.get("@version") {
-						if version.as_number() != Some(Some(1.1)) { return Err(err!(InvalidVersionValue)) }
-						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
-					}
-					if let Some(import_url) = json.get("@import") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
-						if let Some(import_url) = import_url.as_string() {
-							let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
-							let import = load_remote(import.as_str(), options.inner,
-								Some("http://www.w3.org/ns/json-ld#context".to_string()),
-								vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
-									.map_err(|e| {
-										if let LoadingDocumentFailed = e.code {
-											JsonLdError { code: LoadingRemoteContextFailed, ..e }
-										} else { e }
-									})?;
-							let import = import.document.to_parsed().map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
-							let import_context = import.get_attr("@context")
-								.and_then(|ctx| ctx.as_object())
-								.ok_or(err!(InvalidRemoteContext))?;
-							if import_context.contains("@import") { return Err(err!(InvalidContextEntry)); }
-							for (key, value) in import_context.iter() {
-								if json.get(key).is_none() {
-									json.to_mut().insert(key.to_string(), value.clone());
-								}
-							}
-						} else {
-							Err(err!(InvalidImportValue))?
+	local_context.iter().map(|context| async move {
+		Ok(Some(match context {
+			Some(JsonOrReference::Reference(iri)) => {
+				let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
+				if validate_scoped_context == false && remote_contexts.contains(&context) { return Ok(None); }
+				if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
+				remote_contexts.insert(Box::new(context.clone()));
+				let loaded_context = if let Some(loaded_context) = options.loaded_contexts.get(&context) {
+					loaded_context
+				} else {
+					let context_document = load_remote(context.as_str(), options.inner,
+						Some("http://www.w3.org/ns/json-ld#context".to_string()),
+						vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
+						.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+					let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+					let loaded_context = context_document.document.to_parsed()
+						.map_err(|e| err!(LoadingRemoteContextFailed, , e))?
+						.as_object_mut()
+						.and_then(|obj| obj.remove("@context"))
+						.and_then(|ctx| ctx.into_object())
+						.ok_or(err!(InvalidRemoteContext))?;
+					options.loaded_contexts.insert(context, Box::new(LoadedContext { context: loaded_context, base_url }))
+				};
+				Some((Cow::Borrowed(&loaded_context.context), Some(&loaded_context.base_url)))
+			},
+			Some(JsonOrReference::JsonObject(json)) => Some((json.clone(), None)),
+			None => None
+		}))
+	}).collect::<stream::FuturesOrdered<_>>().filter_map(|context| future::ready(context.transpose()))
+			.try_fold(result, |mut result, context| async {
+		if let Some((mut json, base)) = context {
+			let base_url = base.or(base_url);
+			if let Some(version) = json.get("@version") {
+				if version.as_number() != Some(Some(1.1)) { return Err(err!(InvalidVersionValue)) }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+			}
+			if let Some(import_url) = json.get("@import") {
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+				if let Some(import_url) = import_url.as_string() {
+					let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
+					let import = load_remote(import.as_str(), options.inner,
+						Some("http://www.w3.org/ns/json-ld#context".to_string()),
+						vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
+							.map_err(|e| {
+								if let LoadingDocumentFailed = e.code {
+									JsonLdError { code: LoadingRemoteContextFailed, ..e }
+								} else { e }
+							})?;
+					let import = import.document.to_parsed().map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+					let import_context = import.get_attr("@context")
+						.and_then(|ctx| ctx.as_object())
+						.ok_or(err!(InvalidRemoteContext))?;
+					if import_context.contains("@import") { return Err(err!(InvalidContextEntry)); }
+					for (key, value) in import_context.iter() {
+						if json.get(key).is_none() {
+							json.to_mut().insert(key.to_string(), value.clone());
 						}
 					}
-					if let Some(value) = json.get("@base") {
-						if remote_contexts.is_empty() {
-							match value.as_enum() {
-								Borrowed::String(iri) => {
-									result.base_iri = Some(resolve(&iri, result.base_iri.as_ref())
-										.map_err(|e| err!(InvalidBaseIRI, , e))?);
-								},
-								Borrowed::Null => result.base_iri = None,
-								_ => return Err(err!(InvalidBaseIRI, "not string or null"))
-							}
-						}
+				} else {
+					Err(err!(InvalidImportValue))?
+				}
+			}
+			if let Some(value) = json.get("@base") {
+				if remote_contexts.is_empty() {
+					match value.as_enum() {
+						Borrowed::String(iri) => {
+							result.base_iri = Some(resolve(&iri, result.base_iri.as_ref())
+								.map_err(|e| err!(InvalidBaseIRI, , e))?);
+						},
+						Borrowed::Null => result.base_iri = None,
+						_ => return Err(err!(InvalidBaseIRI, "not string or null"))
 					}
-					if let Some(value) = json.get("@vocab") {
-						result.vocabulary_mapping = match value.as_enum() {
-							Borrowed::String(iri) => expand_iri!(active_context, &iri, true)
-								.map_err(|e| err!(InvalidVocabMapping, , e))?,
-							Borrowed::Null => None,
-							_ => return Err(err!(InvalidVocabMapping, "not string or null"))
-						}
-					}
-					if let Some(value) = json.get("@language") {
-						result.default_language = process_language(value)?;
-					}
-					if let Some(value) = json.get("@direction") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
-						result.default_base_direction = process_direction(value, true)?;
-					}
-					if json.contains("@propagate") {
-						if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
-					}
+				}
+			}
+			if let Some(value) = json.get("@vocab") {
+				result.vocabulary_mapping = match value.as_enum() {
+					Borrowed::String(iri) => expand_iri!(active_context, &iri, true)
+						.map_err(|e| err!(InvalidVocabMapping, , e))?,
+					Borrowed::Null => None,
+					_ => return Err(err!(InvalidVocabMapping, "not string or null"))
+				}
+			}
+			if let Some(value) = json.get("@language") {
+				result.default_language = process_language(value)?;
+			}
+			if let Some(value) = json.get("@direction") {
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+				result.default_base_direction = process_direction(value, true)?;
+			}
+			if json.contains("@propagate") {
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+			}
 
-					let mut defined = HashMap::<String, bool>::new();
-					let protected = json.get("@protected").map_or(Ok(false), |v| v.as_bool().ok_or(err!(InvalidProtectedValue)))?;
-					for (key, _) in json.iter() {
-						match key {
-							"@base" | "@direction" | "@import" | "@language" |
-								"@propagate" | "@protected" | "@version" | "@vocab" => {},
-							_ => {
-								create_term_definition(&mut result, &json, key, &mut defined, options.inner,
-									base_url, protected, override_protected)?;
+			let mut defined = HashMap::<String, bool>::new();
+			let protected = json.get("@protected").map_or(Ok(false), |v| v.as_bool().ok_or(err!(InvalidProtectedValue)))?;
+			for (key, _) in json.iter() {
+				match key {
+					"@base" | "@direction" | "@import" | "@language" |
+						"@propagate" | "@protected" | "@version" | "@vocab" => {},
+					_ => {
+						create_term_definition(&mut result, &json, key, &mut defined, options.inner,
+							base_url, protected, override_protected)?;
 
-								// Scoped context validation; In the specification, this is done inside Create Term Definition,
-								// but doing it here is preferred, because minimizing async part of the code help keep things simple
-								if let Some(context) = json.get(key).unwrap().get_attr("@context") {
-									let context = match context.as_enum() {
-										Borrowed::String(context) => JsonOrReference::Reference(Cow::Borrowed(context)),
-										Borrowed::Object(context) => JsonOrReference::JsonObject(Cow::Borrowed(context)),
-										_ => return Err(err!(InvalidScopedContext))
-									};
-									process_context(active_context, vec![Some(context)], base_url, options, remote_contexts,
-										true, true, false).await?;
-								}
-							}
+						// Scoped context validation; In the specification, this is done inside Create Term Definition,
+						// but doing it here is preferred, because minimizing async part of the code help keep things simple
+						if let Some(context) = json.get(key).unwrap().get_attr("@context") {
+							let context = match context.as_enum() {
+								Borrowed::String(context) => JsonOrReference::Reference(Cow::Borrowed(context)),
+								Borrowed::Object(context) => JsonOrReference::JsonObject(Cow::Borrowed(context)),
+								_ => return Err(err!(InvalidScopedContext))
+							};
+							process_context(active_context, vec![Some(context)], base_url, options, remote_contexts,
+								true, true, false).await?;
 						}
 					}
 				}
 			}
+			Ok(result)
 		} else {
 			if !override_protected && active_context.term_definitions.iter().any(|(_, def)| def.protected) {
 				return Err(err!(InvalidContextNullification));
 			}
-			result = Context {
+			Ok(Context {
 				base_iri: active_context.original_base_url.clone(),
 				original_base_url: active_context.original_base_url.clone(),
 				previous_context: if !propagate {
-					Some(Box::new(result))
+					Some(Box::new(result.clone()))
 				} else {
 					None
 				},
 				..Context::default()
-			};
+			})
 		}
-	}
-	Ok(result)
+	}).await
 }
 
 pub fn create_term_definition<T, F, R>(

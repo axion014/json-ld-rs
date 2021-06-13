@@ -89,6 +89,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "elsa"
+version = "1.4.0"
+source = "git+https://github.com/axion014/elsa?branch=set#c4a08c93c1f19509702791a92bb3cf27a2982a5c"
+dependencies = [
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,7 +422,7 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "cc-traits",
- "elsa",
+ "elsa 1.4.0 (git+https://github.com/axion014/elsa?branch=set)",
  "futures",
  "hashmap-entry-ownable",
  "http-link",
@@ -436,11 +444,12 @@ dependencies = [
 [[package]]
 name = "json-ld-rs"
 version = "0.1.0"
-source = "git+https://github.com/axion014/json-ld-rs#e12dd2c7b50bea494d2e31660e0c2d4d8929531e"
+source = "git+https://github.com/axion014/json-ld-rs#b34295574b20083aa7a2dbb6cf79fd97f61ed815"
 dependencies = [
  "async-recursion",
  "cc-traits",
- "elsa",
+ "elsa 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hashmap-entry-ownable",
  "http-link",
  "if_chain",
  "json-trait",
@@ -469,9 +478,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.95"
+version = "0.2.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "789da6d93f1b866ffe175afc5322a4d76c038605a1c3319bb57b06967ca98a36"
+checksum = "5600b4e6efc5421841a2138a6b082e07fe12f9aaa12783d50e5d13325b26b4fc"
 
 [[package]]
 name = "log"

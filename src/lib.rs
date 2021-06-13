@@ -270,9 +270,9 @@ impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a
 
 pub mod JsonLdProcessor {
 	use std::future::Future;
-	use std::collections::HashSet;
 	use std::borrow::Cow;
 
+	use elsa::FrozenSet;
 	use maybe_owned::MaybeOwned;
 
 	use crate::{JsonLdContext, JsonLdInput, JsonLdOptions, JsonLdOptionsImpl, JsonOrReference, Context, RemoteDocument};
@@ -332,7 +332,7 @@ pub mod JsonLdProcessor {
 		})?;
 
 		let mut active_context = process_context(&Context::default(), context.clone(), context_base.as_ref(),
-			&options, &mut HashSet::new(), false, true, true).await?;
+			&options, &FrozenSet::new(), false, true, true).await?;
 		active_context.base_iri = if options.inner.compact_to_relative {
 			context_base
 		} else {
@@ -407,12 +407,12 @@ pub mod JsonLdProcessor {
 				JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri.clone()))])
 			}?;
 			active_context = process_context(&active_context, context, active_context.original_base_url.as_ref(),
-				&options, &mut HashSet::new(), false, true, true).await?;
+				&options, &FrozenSet::new(), false, true, true).await?;
 		}
 		if let JsonLdInput::RemoteDocument(RemoteDocument { context_url: Some(ref context_url), .. }) = *input {
 			active_context = process_context(&active_context, vec![Some(JsonOrReference::Reference(context_url.to_string().into()))],
 				Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
-				&options, &mut HashSet::new(), false, true, true).await?;
+				&options, &FrozenSet::new(), false, true, true).await?;
 		}
 		let (input, document_url) = match input.into_owned() {
 			JsonLdInput::RemoteDocument(document) => {
