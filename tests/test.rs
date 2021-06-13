@@ -5,8 +5,10 @@ use std::borrow::Cow;
 
 use futures::future::FutureExt;
 use json_ld_rs_stable as stable;
-use json_ld_rs::JsonLdProcessor::*;
-use json_ld_rs::{JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdOptionsWithoutDocumentLoader, JsonLdProcessingMode, load_remote};
+use json_ld_rs::{
+	compact, expand,
+	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdOptionsWithoutDocumentLoader, JsonLdProcessingMode, load_remote
+};
 use json_ld_rs::error::JsonLdErrorCode;
 use serde_json::{Value, Map};
 use url::Url;
@@ -46,7 +48,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>, record: &mut TestRecord, depth: usize) -> Result<(), Box<dyn Error>> {
 	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri.clone()) } else { None })
 		.map(|base| Url::parse(&base)).transpose()?;
-	let value = stable::JsonLdProcessor::expand(value, &stable::JsonLdOptions::default()).await?;
+	let value = stable::expand(value, &stable::JsonLdOptions::default()).await?;
 	for item in value {
 		if let Value::Object(item) = item {
 			evaluate_object(item, record, &base_iri, depth).await?;
