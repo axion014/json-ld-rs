@@ -2,7 +2,7 @@ use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
 
-use json_trait::{ForeignMutableJson, BuildableJson, typed_json::{self, *}, Object, Array, MutableObject};
+use json_trait::{ForeignMutableJson, BuildableJson, typed_json::{self, *}, Object, Array, MutableObject, json};
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Len, Remove};
 
 use elsa::FrozenSet;
@@ -49,9 +49,7 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 					Owned::Array(array) => {
 						if definition.and_then(|definition| definition.container_mapping.as_ref())
 								.map_or(false, |container| container.contains("@list")) {
-							let mut object = T::empty_object();
-							object.insert("@list".to_string(), array.into());
-							result.push_back(object.into());
+							result.push_back(json!(T, {"@list": array}));
 						} else {
 							result.extend(array);
 						}
@@ -148,9 +146,8 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 					if invalid_typed_value { return Err(err!(InvalidTypedValue)); }
 				}
 			} else if result.get("@type").map_or(false, |ty| ty.as_array().is_none()) {
-				let mut array = T::empty_array();
-				array.push_back(result.remove("@type").unwrap());
-				result.insert("@type".to_string(), array.into());
+				let ty = json!(T, [result.remove("@type").unwrap()]);
+				result.insert("@type".to_string(), ty);
 			} else if let Some(set) = result.remove("@set") {
 				if result.len() != if result.contains("@index") { 1 } else { 0 } {
 					return Err(err!(InvalidSetOrListObject));
@@ -208,10 +205,7 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 		let definition = active_context.term_definitions.get(key.as_str());
 		let container_mapping = definition.and_then(|definition| definition.container_mapping.as_ref());
 		let mut expanded_value = if definition.and_then(|definition| definition.type_mapping.as_deref()) == Some("@json") {
-			let mut object = T::empty_object();
-			object.insert("@value".to_string(), value);
-			object.insert("@type".to_string(), "@json".into());
-			Owned::Object(object)
+			Owned::Object(json!(T, {"@value": value, "@type": "@json"}))
 		} else {
 			match value.into_enum() {
 				Owned::Object(obj) => {
@@ -254,27 +248,20 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 				if let Owned::Object(ref obj) = expanded_value;
 				if obj.contains("@list");
 				then {} else {
-					if let Owned::Array(_) = expanded_value {} else {
-						let mut array = T::empty_array();
-						array.push_back(expanded_value.into_untyped());
-						expanded_value = Owned::Array(array);
-					}
-					let mut obj = T::empty_object();
-					obj.insert("@list".to_string(), expanded_value.into_untyped());
-					expanded_value = Owned::Object(obj);
+					expanded_value = Owned::Object(json!(T, {
+						"@list": if let Owned::Array(array) = expanded_value {
+							<_ as Into<T>>::into(array)
+						} else {
+							json!(T, [expanded_value.into_untyped()])
+						}
+					}));
 				}
 			}
 		}
 		if container_mapping.map_or(false, |container| container.contains("@graph") &&
 				!container.contains("@id") && !container.contains("@index")) {
 			let into_graph_object = |ev: T| {
-				let mut obj = T::empty_object();
-				obj.insert("@graph".to_string(), if let Some(_) = ev.as_array() { ev } else {
-					let mut array = T::empty_array();
-					array.push_back(ev);
-					array.into()
-				});
-				Owned::Object(obj)
+				Owned::Object(json!(T, {"@graph": if let Some(_) = ev.as_array() { ev } else { json!(T, [ev]) }}))
 			};
 			expanded_value = if let Owned::Array(array) = expanded_value {
 				Owned::Array(array.into_iter().map(into_graph_object).map(|ev| ev.into_untyped()).collect())
@@ -290,9 +277,7 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 				result.get_mut("@reverse").unwrap().as_object_mut().unwrap()
 			};
 			for item in if let Owned::Array(array) = expanded_value { array } else {
-				let mut array = T::empty_array();
-				array.push_back(expanded_value.into_untyped());
-				expanded_value = Owned::Array(array);
+				expanded_value = Owned::Array(json!(T, [expanded_value.into_untyped()]));
 				if let Owned::Array(array) = expanded_value { array } else { unreachable!() }
 			} {
 				if item.as_object().map_or(false, |item| item.contains("@value") || item.contains("@list")) {
@@ -357,8 +342,7 @@ fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option
 	match language_value.into_enum() {
 		Owned::Null => Ok(None),
 		Owned::String(language_value) => {
-			let mut v = T::empty_object();
-			v.insert("@value".to_string(), language_value.into());
+			let mut v: T::Object = json!(T, {"@value": language_value});
 			if let Some(language) = language { v.insert("@language".to_string(), language.into()); }
 			if let Some(direction) = direction { v.insert("@direction".to_string(), direction.as_ref().into()); }
 			Ok(Some(v))
@@ -406,11 +390,7 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(map_context: &Conte
 		index_value: T, index_key: &str, as_graph: bool, property_index: bool) -> Result<T::Object> {
 	let mut index_value = index_value.into_object().ok_or(err!(InvalidValueObject))?;
 	if as_graph && !is_graph_object::<T>(&index_value) {
-		let mut obj = T::empty_object();
-		let mut array = T::empty_array();
-		array.push_back(index_value.into());
-		obj.insert("@graph".to_string(), array.into());
-		index_value = obj.into();
+		index_value = json!(T, {"@graph": [index_value]});
 	}
 	if let Some(expanded_index) = expanded_index {
 		if expanded_index != "@none" {
@@ -418,8 +398,7 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(map_context: &Conte
 				let reexpanded_index = expand_value(map_context, map_context.term_definitions.get(index_key),
 					Owned::String(index.to_string()))?;
 				if let Some(expanded_index_key) = expand_iri!(map_context, index_key)? {
-					let mut array = T::empty_array();
-					array.push_back(reexpanded_index.into());
+					let mut array: T::Array = json!(T, [reexpanded_index]);
 					if let Some(index_property_values) = index_value.remove(&expanded_index_key) {
 						match index_property_values.into_enum() {
 							Owned::Array(index_property_values) => array.extend(index_property_values),
@@ -437,8 +416,7 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(map_context: &Conte
 						index_value.insert(index_key.to_string(), expanded_index.into());
 					},
 					"@type" => {
-						let mut array = T::empty_array();
-						array.push_back(expanded_index.into());
+						let mut array: T::Array = json!(T, [expanded_index]);
 						if let Some(ty) = index_value.remove("@type") {
 							match ty.into_enum() {
 								Owned::Array(ty) => array.extend(ty),
@@ -496,10 +474,7 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 					result.insert(key, if obj.is_empty() {
 						obj.into()
 					} else if let Some(default) = obj.get("@default").and_then(|default| default.as_string()) {
-						let mut new_obj = T::empty_object();
-						new_obj.insert("@default".to_string(), expand_iri!(type_scoped_context, default, true)?
-							.map_or(T::null(), |default| default.into()));
-						new_obj.into()
+						json!(T, {"@default": expand_iri!(type_scoped_context, default, true)?.map_or(T::null(), |default| default.into())})
 					} else {
 						return Err(err!(InvalidTypeValue));
 					});
@@ -524,13 +499,11 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 		},
 		"@graph" => {
 			let expanded_value = expand_internal(active_context, Some("@graph"), value, base_url, options, false).await?;
-			if let Owned::Array(array) = expanded_value {
-				result.insert(key, array.into());
+			result.insert(key, if let Owned::Array(array) = expanded_value {
+				array.into()
 			} else {
-				let mut array = T::empty_array();
-				array.push_back(expanded_value.into_untyped());
-				result.insert(key, array.into());
-			}
+				json!(T, [expanded_value.into_untyped()])
+			});
 		},
 		"@value" => {
 			result.insert(key, if input_type.as_deref() == Some("@json") {
@@ -712,10 +685,8 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(
 		active_context: &Context<'_, T>, definition: Option<&TermDefinition<T>>, value: typed_json::Owned<T>) -> Result<T::Object> {
 	let type_mapping = definition.and_then(|definition| definition.type_mapping.as_deref());
 	if let (Some(type_mapping @ ("@id" | "@vocab")), Owned::String(value)) = (type_mapping, &value) {
-		let mut object = T::empty_object();
-		object.insert("@id".to_string(), expand_iri!(active_context, value, true, type_mapping == "@vocab")?
-			.map(|iri| iri.into()).unwrap_or(T::null()));
-		return Ok(object);
+		return Ok(json!(T, {"@id": expand_iri!(active_context, value, true, type_mapping == "@vocab")?
+			.map_or(T::null(), |iri| iri.into())}));
 	}
 	let mut result = T::empty_object();
 	if let Some(type_mapping) = type_mapping {

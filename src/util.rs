@@ -1,6 +1,6 @@
 use std::borrow::{Borrow, Cow};
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object, Array, typed_json::*};
+use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object, Array, typed_json::*, json};
 
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Remove};
 
@@ -77,10 +77,8 @@ pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, 
 			if let Some(array) = original_value.as_array_mut() {
 				array.push_back(value);
 			} else {
-				let mut array = T::empty_array();
-				array.push_back(object.remove(key).unwrap());
-				array.push_back(value);
-				object.insert(key.to_string(), array.into());
+				let original_value = object.remove(key).unwrap();
+				object.insert(key.to_string(), json!(T, [original_value, value]));
 			}
 		} else {
 			object.insert(key.to_string(), value);

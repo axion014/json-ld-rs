@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::borrow::Cow;
 
-use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object, MutableObject};
+use json_trait::{ForeignMutableJson, typed_json::*, BuildableJson, Array, Object, MutableObject, json};
 use cc_traits::{Get, GetMut, Len, PushBack, Remove, MapInsert};
 
 use elsa::FrozenSet;
@@ -224,9 +224,7 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 			let compacted_item = if compacted_item.as_array().is_some() {
 				compacted_item.into_array().unwrap()
 			} else {
-				let mut array = T::empty_array();
-				array.push_back(compacted_item);
-				array
+				json!(T, [compacted_item])
 			}.into();
 			if !container.contains("@list") {
 				let mut obj = T::empty_object();
@@ -263,13 +261,7 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 					let compacted_item = if_chain! {
 						if let Some(array) = compacted_item.as_array();
 						if array.len() > 1;
-						then {
-							let mut obj = T::empty_object();
-							obj.insert("@include".to_string(), compacted_item);
-							obj.into()
-						} else {
-							compacted_item
-						}
+						then { json!(T, {"@include": compacted_item}) } else { compacted_item }
 					};
 					add_value(nest_result, &item_active_property, compacted_item, as_array);
 				}
@@ -368,9 +360,8 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 					if compacted_item.as_object()
 							.map_or(Ok(false), |compacted_item| Ok(compacted_item.len() == 1 &&
 								expand_iri!(active_context, compacted_item.iter().next().unwrap().0)?.as_deref() == Some("@id")))? {
-						let mut element = T::empty_object();
-						element.insert("@id".to_string(), expanded_item.into_object().unwrap().remove("@id").unwrap_or_else(|| T::null()));
-						compacted_item = compact_internal(active_context, Some(&item_active_property), element.into(),
+						let element = json!(T, {"@id": expanded_item.into_object().unwrap().remove("@id").unwrap_or_else(|| T::null())});
+						compacted_item = compact_internal(active_context, Some(&item_active_property), element,
 							&JsonLdOptionsImpl {
 								inner: &JsonLdOptions { compact_arrays: false, ordered: false, ..(*options.inner).clone() },
 								loaded_contexts: MaybeOwned::Borrowed(&options.loaded_contexts)

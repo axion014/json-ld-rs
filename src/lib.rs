@@ -9,7 +9,7 @@ use std::borrow::{Borrow, Cow};
 use elsa::{FrozenMap, FrozenSet};
 use once_cell::unsync::OnceCell;
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*};
+use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, json};
 use cc_traits::{Get, Len, PushBack, MapInsert, Remove};
 
 use maybe_owned::MaybeOwned;
@@ -331,9 +331,7 @@ pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdCont
 			if array.is_empty() {
 				T::empty_object()
 			} else {
-				let mut object = T::empty_object();
-				object.insert(compact_iri(&active_context, "@graph", &options.inner, None, true, false)?, array.into());
-				object
+				json!(T, {compact_iri(&active_context, "@graph", &options.inner, None, true, false)?: array})
 			}
 		},
 		_ => panic!()
@@ -415,20 +413,12 @@ pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<Json
 				// Only one level of recursion, for sure
 				Owned::Array(array) => array,
 				Owned::Null => T::empty_array(),
-				expanded_output => {
-					let mut array = T::empty_array();
-					array.push_back(expanded_output.into_untyped());
-					array
-				}
+				expanded_output => json!(T, [expanded_output.into_untyped()])
 			}
 		},
 		Owned::Array(array) => array,
 		Owned::Null => T::empty_array(),
-		expanded_output => {
-			let mut array = T::empty_array();
-			array.push_back(expanded_output.into_untyped());
-			array
-		}
+		expanded_output => json!(T, [expanded_output.into_untyped()])
 	})
 }
 
