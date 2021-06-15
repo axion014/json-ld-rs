@@ -636,7 +636,7 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(mut args: IRIExpansionArguments<'a, 'b, T
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
-	if is_jsonld_keyword(value) || value == "" { return Ok(Some(value.to_string())) }
+	if is_jsonld_keyword(value) { return Ok(Some(value.to_string())) }
 	if looks_like_a_jsonld_keyword(value) { return Ok(None) }
 	if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args {
 		if local_context.contains(value) && defined.get(value).map_or(false, |v| !v) {

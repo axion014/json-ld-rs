@@ -35,6 +35,7 @@ pub fn is_iri(value: &str) -> bool {
 }
 
 pub fn as_compact_iri(value: &str) -> Option<(&str, &str)> {
+	if value == "" { return None; }
 	value[1..].find(":").map(|index| (&value[..(index + 1)], &value[(index + 2)..]))
 }
 
