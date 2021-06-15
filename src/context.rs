@@ -323,16 +323,16 @@ pub fn create_term_definition<T, F, R>(
 		Borrowed::String(id) => process_id(Some(&id), true)?,
 		Borrowed::Null => {},
 		Borrowed::Object(value) => {
-			if let Some(id) = value.get("@id") {
-				if value.get("@reverse").is_none() {
+			if value.get("@reverse").is_none() {
+				if let Some(id) = value.get("@id") {
 					match id.as_enum() {
 						Borrowed::String(id) => process_id(Some(&id), false)?,
 						Borrowed::Null => {},
 						_ => return Err(err!(InvalidIRIMapping))
 					}
+				} else {
+					process_id(None, false)?;
 				}
-			} else {
-				process_id(None, false)?;
 			}
 			if let Some(protected) = value.get("@protected") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
