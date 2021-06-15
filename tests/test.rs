@@ -131,7 +131,9 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 
 async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, _is_html: bool,
 		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
-	if value.get("@id").and_then(|url| url.as_str()).map_or(true, |url| !FILTER.is_match(url)) {
+	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
+			.and_then(|v| v.pointer("/0/@value")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid name"))?;
+	if !FILTER.is_match(value["@id"].as_str().unwrap()) && !FILTER.is_match(name) {
 		record.skip += 1;
 		return Ok(());
 	}
@@ -146,8 +148,6 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		}
 	}
 	let options = evaluate_option(options)?;
-	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
-		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
 	let input = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#action")
 		.and_then(|v| v.pointer("/0/@id")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid input"))?;
 	let input = JsonLdInput::<Value>::Reference(Url::options().base_url(
