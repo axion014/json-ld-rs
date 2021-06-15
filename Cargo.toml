@@ -34,6 +34,7 @@ async-recursion = "0.3"
 futures = "0.3"
 json-trait = { git = "https://github.com/axion014/json-trait", features = ["impl_serde_json"] }
 tokio = { version = "1.6.1", features = ["rt-multi-thread", "macros"] }
+regex = "1.5"
 lazy_static = { version = "1.4" }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 json-ld-rs = { path = ".", features = ["reqwest-loader"] }

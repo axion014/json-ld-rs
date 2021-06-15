@@ -12,6 +12,8 @@ use json_ld_rs::{
 use json_ld_rs::error::JsonLdErrorCode;
 use serde_json::{Value, Map};
 use url::Url;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 use async_recursion::async_recursion;
 
@@ -35,11 +37,15 @@ impl std::fmt::Display for JsonLdTestError {
 
 impl Error for JsonLdTestError {}
 
+lazy_static! {
+	static ref FILTER: Regex = Regex::new(std::env::args().nth(2).as_deref().unwrap_or("")).unwrap();
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 	println!();
 	evaluate_json_ld(&stable::JsonLdInput::Reference("https://w3c.github.io/json-ld-api/tests/manifest.jsonld".to_string()),
-		&mut TestRecord { pass: 0, fail: 0 }, 0).await?;
+		&mut TestRecord { pass: 0, fail: 0, skip: 0 }, 0).await?;
 	println!();
 	Ok(())
 }
@@ -99,7 +105,7 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 	}
 	if let Some(Value::Array(sequence)) = value.remove("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#entries")
 	 		.map(|mut sequence| sequence.as_array_mut().unwrap().remove(0).as_object_mut().unwrap().remove("@list").unwrap()){
-		let mut record = TestRecord { pass: 0, fail: 0 };
+		let mut record = TestRecord { pass: 0, fail: 0, skip: 0 };
 		for item in sequence {
 			if let Value::Object(value) = item {
 				if let Some(url) = value.get("@id").and_then(|url| url.as_str())
@@ -115,15 +121,20 @@ async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut Te
 				panic!("invalid item in sequence");
 			}
 		}
-		println!("{}{} passed; {} failed", "    ".repeat(depth), record.pass, record.fail);
+		println!("{}{} passed; {} failed; {} skipped", "    ".repeat(depth), record.pass, record.fail, record.skip);
 		parent_record.pass += record.pass;
 		parent_record.fail += record.fail;
+		parent_record.skip += record.skip;
 	}
 	Ok(())
 }
 
 async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, _is_html: bool,
 		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
+	if value.get("@id").and_then(|url| url.as_str()).map_or(true, |url| !FILTER.is_match(url)) {
+		record.skip += 1;
+		return Ok(());
+	}
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
 	let input = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#action")
