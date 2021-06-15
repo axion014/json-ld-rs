@@ -236,6 +236,7 @@ pub fn create_term_definition<T, F, R>(
 		else { return Err(err!(CyclicIRIMapping)); }
 	}
 	if term == "" { return Err(err!(InvalidTermDefinition)); }
+	defined.insert(term.to_string(), false);
 	let value_enum =  local_context.get(term).unwrap().as_enum();
 	if term == "@type" {
 		if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(KeywordRedefinition)); }
@@ -278,7 +279,7 @@ pub fn create_term_definition<T, F, R>(
 				if looks_like_a_jsonld_keyword(id) { return Ok(()) }
 				definition.iri = process_context_iri!(active_context, id, local_context, defined, options)?;
 				if term.starts_with(":") || term.ends_with(":") || term.contains("/") {
-					defined.insert(term.to_string(), true);
+					*defined.get_mut(term).unwrap() = true;
 					if definition.iri != process_context_iri!(active_context, id, local_context, defined, options)? {
 						return Err(err!(InvalidIRIMapping));
 					}
@@ -374,7 +375,7 @@ pub fn create_term_definition<T, F, R>(
 				}
 				definition.reverse_property = true;
 				active_context.term_definitions.insert(term.to_string().into(), definition);
-				defined.insert(term.to_string(), true);
+				*defined.get_mut(term).unwrap() = true;
 				return Ok(());
 			}
 			if let Some(container) = value.get("@container") {
@@ -476,7 +477,7 @@ pub fn create_term_definition<T, F, R>(
 	}
 
 	active_context.term_definitions.insert(term.to_string().into(), definition);
-	defined.insert(term.to_string(), true);
+	*defined.get_mut(term).unwrap() = true;
 
 	Ok(())
 }
