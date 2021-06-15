@@ -305,7 +305,7 @@ pub fn create_term_definition<T, F, R>(
 				definition.iri = Some(term.to_string());
 			}
 		} else if term.contains("/") {
-			definition.iri = process_context_iri!(active_context, term, local_context, defined, options)?;
+			definition.iri = expand_iri!(active_context, term)?;
 			if !definition.iri.as_ref().map_or(false, |s| is_iri(s)) { return Err(err!(InvalidIRIMapping)); }
 		} else if term == "@type" {
 			definition.iri = Some("@type".to_string());
