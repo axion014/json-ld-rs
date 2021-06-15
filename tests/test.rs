@@ -136,6 +136,15 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		return Ok(());
 	}
 	let options = value.get("https://w3c.github.io/json-ld-api/tests/vocab#option").and_then(|options| options.get(0));
+	if let Some(options) = options {
+		if options.get("https://w3c.github.io/json-ld-api/tests/vocab#httpLink").is_some() ||
+		 		options.get("https://w3c.github.io/json-ld-api/tests/vocab#contentType").is_some() ||
+				options.get("https://w3c.github.io/json-ld-api/tests/vocab#redirectTo").is_some() ||
+				options.get("https://w3c.github.io/json-ld-api/tests/vocab#httpStatus").is_some() {
+			record.skip += 1;
+			return Ok(());
+		}
+	}
 	let options = evaluate_option(options)?;
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
