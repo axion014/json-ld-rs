@@ -135,13 +135,14 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		record.skip += 1;
 		return Ok(());
 	}
+	let options = value.get("https://w3c.github.io/json-ld-api/tests/vocab#option").and_then(|options| options.get(0));
+	let options = evaluate_option(options)?;
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 		.and_then(|v| v.pointer("/0/@value")).ok_or(JsonLdTestError::InvalidManifest("no name found"))?;
 	let input = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#action")
 		.and_then(|v| v.pointer("/0/@id")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid input"))?;
 	let input = JsonLdInput::<Value>::Reference(Url::options().base_url(
 		base.as_ref()).parse(input).map_err(|_| JsonLdTestError::InvalidManifest("invalid input url"))?.to_string());
-	let options = evaluate_option(value.get("https://w3c.github.io/json-ld-api/tests/vocab#option"))?;
 	let output = match test_class {
 		TestClass::CompactTest => {
 			let context = value.get("https://w3c.github.io/json-ld-api/tests/vocab#context")
@@ -245,13 +246,14 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptionsWithoutDocumentLoader<'_, Value>, JsonLdTestError> {
 	Ok(JsonLdOptions {
 		base: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#base")
-			.and_then(|v| v.get("@value")).map(|base| base.as_str().map(|base| base.to_string())
+			.and_then(|v| v.pointer("/0/@value")).map(|base| base.as_str().map(|base| base.to_string())
 			.ok_or(JsonLdTestError::InvalidManifest("invalid base iri")))).transpose()?,
 		expand_context: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#expandContext")
-			.and_then(|v| v.get("@value")).map(|context| context.as_str().map(|context| JsonOrReference::Reference(Cow::Borrowed(context)))
+			.and_then(|v| v.pointer("/0/@value"))
+			.map(|context| context.as_str().map(|context| JsonOrReference::Reference(Cow::Borrowed(context)))
 			.ok_or(JsonLdTestError::InvalidManifest("invalid expand context")))).transpose()?,
 		processing_mode: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#processingMode")
-			.and_then(|v| v.get("@value")).map(|mode| match mode.as_str() {
+			.and_then(|v| v.pointer("/0/@value")).map(|mode| match mode.as_str() {
 				Some("json-ld-1.1") => Ok(JsonLdProcessingMode::JsonLd1_1),
 				Some("json-ld-1.0") => Ok(JsonLdProcessingMode::JsonLd1_0),
 				_ => Err(JsonLdTestError::InvalidManifest("invalid processing mode"))
