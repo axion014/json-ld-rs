@@ -170,7 +170,10 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 			std::panic::AssertUnwindSafe(expand(&input, &options)).catch_unwind().await
 				.map(|output| output.map(|output| Value::Array(output)))
 		},
-		_ => return Ok(())
+		_ => {
+			record.skip += 1;
+			return Ok(())
+		}
 	};
 	match output {
 		Ok(output) => match output {
