@@ -102,7 +102,7 @@ struct TermDefinition<'a, T> where
 	protected: bool,
 	reverse_property: bool,
 	base_url: Option<Url>,
-	context: Option<JsonOrReference<'a, T>>,
+	context: OptionalContexts<'a, T>,
 	container_mapping: Option<BTreeSet<String>>,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
@@ -317,7 +317,7 @@ pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdCont
 		}
 	})?;
 
-	let mut active_context = process_context(&Context::default(), context.clone(), context_base.as_ref(),
+	let mut active_context = process_context(&Context::default(), &context, context_base.as_ref(),
 		&options, &FrozenSet::new(), false, true, true).await?;
 	active_context.base_iri = if options.inner.compact_to_relative {
 		context_base
@@ -390,16 +390,16 @@ pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: impl Into<Json
 				.map_or(Ok(vec![Some(JsonOrReference::JsonObject(json.clone()))]), |json| map_context(Cow::Borrowed(json))),
 			JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri.clone()))])
 		}?;
-		active_context = process_context(&active_context, context, active_context.original_base_url.as_ref(),
-			&options, &FrozenSet::new(), false, true, true).await?;
-	}
-	if let JsonLdInput::RemoteDocument(RemoteDocument { context_url: Some(ref context_url), .. }) = *input {
-		active_context = process_context(&active_context, vec![Some(JsonOrReference::Reference(context_url.to_string().into()))],
-			Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
+		active_context = process_context(&active_context, &context, active_context.original_base_url.as_ref(),
 			&options, &FrozenSet::new(), false, true, true).await?;
 	}
 	let (input, document_url) = match input.into_owned() {
 		JsonLdInput::RemoteDocument(document) => {
+			if let Some(ref context_url) = document.context_url {
+				active_context = process_context(&active_context, &vec![Some(JsonOrReference::Reference(context_url.clone().into()))],
+					Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
+					&options, &FrozenSet::new(), false, true, true).await?;
+			}
 			(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url.clone()))
 		},
 		JsonLdInput::JsonObject(json) => (json.into(), options.inner.base.clone()),

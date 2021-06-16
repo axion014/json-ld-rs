@@ -20,7 +20,7 @@ use crate::{
 	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{
-	is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, is_iri, as_compact_iri, make_lang_dir
+	is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, is_iri, as_compact_iri, make_lang_dir, map_context
 };
 use crate::error::{Result, JsonLdErrorCode::*, JsonLdError};
 use crate::remote::{load_remote, LoadDocumentOptions};
@@ -70,7 +70,7 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 
 #[async_recursion(?Send)]
 pub async fn process_context<'a, 'b, T, F, R>(
-		active_context: &'b Context<'a, T>, local_context: OptionalContexts<'a, T>, base_url: Option<&'b Url>,
+		active_context: &'b Context<'a, T>, local_context: &'b OptionalContexts<'a, T>, base_url: Option<&'b Url>,
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
@@ -164,7 +164,7 @@ pub async fn process_context<'a, 'b, T, F, R>(
 			}
 			if let Some(value) = json.get("@vocab") {
 				result.vocabulary_mapping = match value.as_enum() {
-					Borrowed::String(iri) => expand_iri!(active_context, &iri, true)
+					Borrowed::String(iri) => expand_iri!(&result, &iri, true)
 						.map_err(|e| err!(InvalidVocabMapping, , e))?,
 					Borrowed::Null => None,
 					_ => return Err(err!(InvalidVocabMapping, "not string or null"))
@@ -183,24 +183,19 @@ pub async fn process_context<'a, 'b, T, F, R>(
 
 			let mut defined = HashMap::<String, bool>::new();
 			let protected = json.get("@protected").map_or(Ok(false), |v| v.as_bool().ok_or(err!(InvalidProtectedValue)))?;
-			for (key, _) in json.iter() {
+			for (key, value) in json.iter() {
 				match key {
 					"@base" | "@direction" | "@import" | "@language" |
 						"@propagate" | "@protected" | "@version" | "@vocab" => {},
 					_ => {
-						create_term_definition(&mut result, &json, key, &mut defined, options.inner,
+						create_term_definition(&mut result, &json, key, value.as_enum(), &mut defined, options.inner,
 							base_url, protected, override_protected)?;
 
 						// Scoped context validation; In the specification, this is done inside Create Term Definition,
 						// but doing it here is preferred, because minimizing async part of the code help keep things simple
-						if let Some(context) = json.get(key).unwrap().get_attr("@context") {
-							let context = match context.as_enum() {
-								Borrowed::String(context) => JsonOrReference::Reference(Cow::Borrowed(context)),
-								Borrowed::Object(context) => JsonOrReference::JsonObject(Cow::Borrowed(context)),
-								_ => return Err(err!(InvalidScopedContext))
-							};
-							process_context(active_context, vec![Some(context)], base_url, options, remote_contexts,
-								true, true, false).await?;
+						if value.get_attr("@context").is_some() {
+							process_context(&result, &result.term_definitions.get(key).unwrap().context,
+								base_url, options, remote_contexts, true, true, false).await?;
 						}
 					}
 				}
@@ -225,7 +220,7 @@ pub async fn process_context<'a, 'b, T, F, R>(
 }
 
 pub fn create_term_definition<T, F, R>(
-		active_context: &mut Context<'_, T>, local_context: &T::Object, term: &str, defined: &mut HashMap<String, bool>,
+		active_context: &mut Context<T>, local_context: &T::Object, term: &str, value: Borrowed<T>, defined: &mut HashMap<String, bool>,
 		options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
@@ -237,10 +232,9 @@ pub fn create_term_definition<T, F, R>(
 	}
 	if term == "" { return Err(err!(InvalidTermDefinition)); }
 	defined.insert(term.to_string(), false);
-	let value_enum =  local_context.get(term).unwrap().as_enum();
 	if term == "@type" {
 		if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(KeywordRedefinition)); }
-		if let Borrowed::Object(value) = value_enum {
+		if let Borrowed::Object(value) = value {
 			for (key, value) in value.iter() {
 				match key {
 					"@container" if value.as_string() == Some("@set") => (),
@@ -264,7 +258,7 @@ pub fn create_term_definition<T, F, R>(
 		protected,
 		reverse_property: false,
 		base_url: None,
-		context: None,
+		context: vec![],
 		container_mapping: None,
 		direction_mapping: None,
 		index_mapping: None,
@@ -294,8 +288,8 @@ pub fn create_term_definition<T, F, R>(
 			}
 		}
 		if let Some((prefix, suffix)) = as_compact_iri(term) {
-			if local_context.contains(prefix) {
-				create_term_definition(active_context, local_context, prefix, defined, options,
+			if let Some(prefix_definition) = local_context.get(prefix) {
+				create_term_definition(active_context, local_context, prefix, prefix_definition.as_enum(), defined, options,
 					None, false, false)?;
 			}
 			if let Some(prefix_definition) = active_context.term_definitions.get(prefix) {
@@ -319,7 +313,7 @@ pub fn create_term_definition<T, F, R>(
 		Ok(())
 	};
 
-	match value_enum {
+	match value {
 		Borrowed::String(id) => process_id(Some(&id), true)?,
 		Borrowed::Null => {},
 		Borrowed::Object(value) => {
@@ -414,14 +408,10 @@ pub fn create_term_definition<T, F, R>(
 				let index = index.as_string().ok_or(err!(InvalidTermDefinition))?;
 				definition.index_mapping = Some(index.to_string());
 			}
-			if let Some(context_raw) = value.get("@context") {
+			if let Some(context) = value.get("@context") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
-				let context_owned = match context_raw.as_enum() {
-					Borrowed::String(context) => JsonOrReference::Reference(Cow::Owned(context.to_owned())),
-					Borrowed::Object(context) => JsonOrReference::JsonObject(Cow::Owned(context.to_owned())),
-					_ => return Err(err!(InvalidScopedContext))
-				};
-				definition.context = Some(context_owned);
+				let context = map_context(Cow::Owned(context.clone())).map_err(|e| err!(InvalidScopedContext, , e))?;
+				definition.context = context;
 				definition.base_url = base_url.cloned();
 			}
 			if !value.contains("@type") {

@@ -69,9 +69,9 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 			let mut active_context = if_chain! {
 				if let Some(term_definition) = active_property
 					.and_then(|active_property| active_context.term_definitions.get(active_property));
-				if let Some(context) = term_definition.context.as_ref();
+				if !term_definition.context.is_empty();
 				then {
-					Cow::Owned(process_context(active_context, vec![Some(context.clone())], term_definition.base_url.as_ref(),
+					Cow::Owned(process_context(active_context, &term_definition.context, term_definition.base_url.as_ref(),
 						options, &FrozenSet::new(), true, false, true).await?)
 				} else {
 					Cow::Borrowed(active_context)
@@ -95,10 +95,12 @@ pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'
 					.map(|expanded_type| Ok(compact_iri(&active_context, expanded_type, options.inner, None, true, false)?))
 					.collect::<Result<BTreeSet<String>>>()?;
 				for term in compacted_types {
-					if let Some(TermDefinition { context: Some(local_context), base_url, .. }) =
+					if let Some(TermDefinition { context: local_context, base_url, .. }) =
 							type_scoped_context.term_definitions.get(term.as_str()) {
-						active_context = Cow::Owned(process_context(&mut active_context, vec![Some(local_context.clone())], base_url.as_ref(),
-							options, &FrozenSet::new(), false, false, true).await?);
+						if !local_context.is_empty() {
+							active_context = Cow::Owned(process_context(&mut active_context, local_context, base_url.as_ref(),
+								options, &FrozenSet::new(), false, false, true).await?);
+						}
 					}
 				}
 			}

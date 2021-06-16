@@ -25,6 +25,15 @@ use crate::util::{
 };
 use crate::context::{process_context, create_term_definition};
 
+// In absense of !(Never) type, a transmute is necessary
+fn empty_vec<T>() -> &'static Vec<T> {
+	static EMPTY_VEC: Vec<()> = vec![];
+	unsafe {
+		// SAFETY: The vector is always empty, and its value is uninhabited
+		std::mem::transmute(&EMPTY_VEC)
+	}
+}
+
 #[async_recursion(?Send)]
 pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>, element: T,
 		base_url: Option<&'b Url>, options: &'b JsonLdOptionsImpl<'a, T, F, R>, from_map: bool) -> Result<Owned<T>>  where
@@ -34,7 +43,7 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 {
 	let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
 	let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
-	let property_scoped_context = definition.and_then(|definition| definition.context.as_ref());
+	let property_scoped_context: &crate::OptionalContexts<_> = definition.map_or(empty_vec(), |definition| &definition.context);
 	match element.into_enum() {
 		Owned::Null => Ok(Owned::Null),
 		Owned::Array(array) => {
@@ -76,14 +85,14 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 				};
 				then { previous_context } else { active_context }
 			});
-			if let Some(property_scoped_context) = property_scoped_context {
-				active_context = Cow::Owned(process_context(&active_context, vec![Some(property_scoped_context.clone())],
+			if !property_scoped_context.is_empty() {
+				active_context = Cow::Owned(process_context(&active_context, property_scoped_context,
 					definition.unwrap().base_url.as_ref(), options, &FrozenSet::new(), true, true, true).await?);
 			}
 			let mut obj = obj.into_iter().collect::<BTreeMap<_, _>>();
 			if let Some(context) = obj.remove("@context") {
 				active_context = Cow::Owned(process_context(&active_context,
-					map_context(Cow::Owned(context))?,
+					&map_context(Cow::Owned(context))?,
 					base_url, options, &FrozenSet::new(), false, true, true).await?);
 			}
 			let type_scoped_context = active_context.clone();
@@ -99,17 +108,16 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 									Ok(term)
 								}).filter_map(|term| {
 									term.map(|term| type_scoped_context.term_definitions.get(*term)
-										.and_then(|definition| definition.context.as_ref())
-										.map(|context| (term, context))).transpose()
+										.map(|definition| (term, &definition.context))).transpose()
 								}).collect::<Result<BTreeMap<_, _>>>()? {
-							active_context = Cow::Owned(process_context(&active_context, vec![Some((*context).clone())],
+							active_context = Cow::Owned(process_context(&active_context, &context,
 								active_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
 								options, &FrozenSet::new(), false, false, true).await?);
 						}
 					} else if let Some(term) = value.as_string() {
 						input_type = expand_iri!(&active_context, term)?;
-						if let Some(context) = type_scoped_context.term_definitions.get(term).and_then(|definition| definition.context.as_ref()) {
-							active_context = Cow::Owned(process_context(&active_context, vec![Some((*context).clone())],
+						if let Some(context) = type_scoped_context.term_definitions.get(term).map(|definition| &definition.context) {
+							active_context = Cow::Owned(process_context(&active_context, &context,
 								active_context.term_definitions.get(term).unwrap().base_url.as_ref(),
 								options, &FrozenSet::new(), false, false, true).await?);
 						}
@@ -169,8 +177,8 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 		},
 		value => {
 			if active_property.is_none() || active_property == Some("@graph") { return Ok(Owned::Null) }
-			Ok(Owned::Object(if let Some(property_scoped_context) = property_scoped_context {
-				expand_value(&process_context(active_context, vec![Some(property_scoped_context.clone())],
+			Ok(Owned::Object(if !property_scoped_context.is_empty() {
+				expand_value(&process_context(active_context, &property_scoped_context,
 					definition.unwrap().base_url.as_ref(), options, &FrozenSet::new(), false, true, true).await?,
 					definition, value)?
 			} else {
@@ -362,9 +370,9 @@ async fn expand_index_map<T, F, R>(map_context: &Context<'_, T>, key: &str, inde
 		let map_context = if_chain! {
 			if index_key == "@type";
 			if let Some(definition) = map_context.term_definitions.get(index.as_str());
-			if let Some(ref context) = definition.context;
+			if !definition.context.is_empty();
 			then {
-				Cow::Owned(process_context(&map_context, vec![Some(context.clone())], definition.base_url.as_ref(),
+				Cow::Owned(process_context(&map_context, &definition.context, definition.base_url.as_ref(),
 					options, &FrozenSet::new(), false, true, true).await?)
 			} else {
 				Cow::Borrowed(map_context)
@@ -638,9 +646,13 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(mut args: IRIExpansionArguments<'a, 'b, T
 {
 	if is_jsonld_keyword(value) { return Ok(Some(value.to_string())) }
 	if looks_like_a_jsonld_keyword(value) { return Ok(None) }
-	if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args {
-		if local_context.contains(value) && defined.get(value).map_or(false, |v| !v) {
-			create_term_definition(active_context, local_context, value, defined, options, None, false, false)?;
+	if_chain! {
+		if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args;
+		if let Some(value_definition) = local_context.get(value);
+		if defined.get(value).map_or(false, |v| !v);
+		then {
+			create_term_definition(active_context, local_context, value, value_definition.as_enum(),
+				defined, options, None, false, false)?;
 		}
 	}
 	if let Some(definition) = args.active_context().term_definitions.get(value) {
@@ -652,9 +664,13 @@ pub fn expand_iri<'a, 'b: 'a, T, F, R>(mut args: IRIExpansionArguments<'a, 'b, T
 		if prefix == "_" || suffix.starts_with("//") {
 			return Ok(Some(value.to_string()));
 		}
-		if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args {
-			if local_context.contains(prefix) && defined.get(prefix).map_or(false, |v| !v) {
-				create_term_definition(active_context, local_context, prefix, defined, options, None, false, false)?;
+		if_chain! {
+			if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args;
+			if let Some(prefix_definition) = local_context.get(prefix);
+			if defined.get(prefix).map_or(false, |v| !v);
+			then {
+				create_term_definition(active_context, local_context, prefix, prefix_definition.as_enum(),
+					defined, options, None, false, false)?;
 			}
 		}
 		if_chain! {
