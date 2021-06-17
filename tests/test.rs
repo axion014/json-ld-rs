@@ -38,7 +38,7 @@ impl std::fmt::Display for JsonLdTestError {
 impl Error for JsonLdTestError {}
 
 lazy_static! {
-	static ref FILTER: Regex = Regex::new(std::env::args().nth(2).as_deref().unwrap_or("")).unwrap();
+	static ref FILTER: Regex = Regex::new(std::env::args().nth(1).as_deref().unwrap_or("")).unwrap();
 }
 
 #[tokio::main]
