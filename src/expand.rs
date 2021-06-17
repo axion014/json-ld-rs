@@ -169,8 +169,8 @@ pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a
 			}
 			if (result.len() == 1 && result.contains("@language")) ||
 					(active_property.is_none() || active_property == Some("@graph")) &&
-					(result.is_empty() || (result.len() == 1 && (result.contains("@value") || result.contains("@list") ||
-					(!options.inner.frame_expansion && result.contains("@id"))))) {
+					(result.is_empty() || result.contains("@value") || result.contains("@list") ||
+					(!options.inner.frame_expansion && result.len() == 1 && result.contains("@id"))) {
 				return Ok(Owned::Null);
 			}
 			Ok(Owned::Object(result))
