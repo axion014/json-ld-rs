@@ -70,8 +70,8 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 
 #[async_recursion(?Send)]
 pub(crate) async fn process_context<'a, 'b, T, F, R>(
-		active_context: &'b Context<'a, T>, local_context: &'b OptionalContexts<'a, T>, base_url: Option<&'b Url>,
-		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
+		active_context: &'b Context<'a, T>, local_context: &OptionalContexts<T>, base_url: Option<&'b Url>,
+		options: &JsonLdOptionsImpl<T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
@@ -223,7 +223,7 @@ pub fn create_term_definition<T, F, R>(
 		active_context: &mut Context<T>, local_context: &T::Object, term: &str, value: Borrowed<T>, defined: &mut HashMap<String, bool>,
 		options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	if let Some(defined) = defined.get(term) {
@@ -472,9 +472,7 @@ pub fn create_term_definition<T, F, R>(
 	Ok(())
 }
 
-pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> InverseContext where
-	T: ForeignMutableJson + BuildableJson
-{
+pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>) -> InverseContext {
 	let mut result = InverseContext::new();
 	for (key, value) in active_context.term_definitions.iter() {
 		let container_map = if let Some(ref iri) = value.iri {
@@ -520,8 +518,8 @@ pub fn create_inverse_context<'a, T>(active_context: &Context<'a, T>) -> Inverse
 	result
 }
 
-pub fn select_term<'a: 'b, 'b, T>(active_context: &'b Context<'a, T>,
-		var: &str, containers: Vec<&str>, type_language: &str, preferred_values: Vec<&str>) -> Option<&'b str> where
+pub fn select_term<'a, T>(active_context: &'a Context<T>,
+		var: &str, containers: Vec<&str>, type_language: &str, preferred_values: Vec<&str>) -> Option<&'a str> where
 	T: ForeignMutableJson + BuildableJson
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));

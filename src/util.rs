@@ -87,7 +87,7 @@ pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, 
 	}
 }
 
-pub fn map_context<'a, T: ForeignMutableJson + BuildableJson>(ctx: Cow<'a, T>) -> Result<OptionalContexts<'a, T>, JsonLdError> {
+pub fn map_context<T: ForeignMutableJson + BuildableJson>(ctx: Cow<T>) -> Result<OptionalContexts<T>, JsonLdError> {
 	match ctx {
 		Cow::Owned(ctx) => match ctx.into_enum() {
 			Owned::Array(ctx) => ctx.into_iter().map(|value| Ok(match value.into_enum() {

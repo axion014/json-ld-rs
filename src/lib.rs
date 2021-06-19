@@ -357,19 +357,19 @@ pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdCont
 	Ok(compacted_output)
 }
 
-pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: &JsonLdOptions<'a, T, F, R>) ->
+pub async fn expand<T, F, R>(input: &JsonLdInput<T>, options: &JsonLdOptions<'_, T, F, R>) ->
 		Result<<T as ForeignJson>::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	expand_with_loaded_contexts(input, options.into()).await
 }
 
-async fn expand_with_loaded_contexts<'a, T, F, R>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'a, T, F, R>) ->
+async fn expand_with_loaded_contexts<T, F, R>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'_, T, F, R>) ->
 		Result<<T as ForeignJson>::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let input = if let JsonLdInput::Reference(iri) = input {

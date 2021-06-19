@@ -15,11 +15,11 @@ pub struct LoadDocumentOptions {
 	pub request_profile: Vec<String>
 }
 
-pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptions<'a, T, F, R>,
+pub async fn load_remote<T, F, R>(iri: &str, options: &JsonLdOptions<'_, T, F, R>,
 	profile: Option<String>, request_profile: Vec<String>) ->
 		Result<RemoteDocument<T>, JsonLdError> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>, JsonLdError>>
 {
 	let load_document_options = Some(LoadDocumentOptions {

@@ -20,10 +20,10 @@ use crate::expand::expand_iri;
 use crate::util::{resolve, make_lang_dir, is_graph_object, add_value};
 
 #[async_recursion(?Send)]
-pub(crate) async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>,
-		element: T, options: &'b JsonLdOptionsImpl<'a, T, F, R>) -> Result<T> where
+pub(crate) async fn compact_internal<'a, T, F, R>(active_context: &Context<'a, T>, active_property: Option<&'a str>,
+		element: T, options: &JsonLdOptionsImpl<T, F, R>) -> Result<T> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	match element.into_enum() {
@@ -115,11 +115,11 @@ pub(crate) async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Co
 	}
 }
 
-async fn compact_map<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_scoped_context: &Context<'a, T>,
-		active_property: Option<&'b str>, expanded_map: impl MutableObject<T>,
-		options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<T::Object> where
+async fn compact_map<T, F, R>(active_context: &Context<'_, T>, type_scoped_context: &Context<'_, T>,
+		active_property: Option<&str>, expanded_map: impl MutableObject<T>,
+		options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<T::Object> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let mut result = T::empty_object();
@@ -208,10 +208,10 @@ async fn compact_map<'a: 'b, 'b, T, F, R>(active_context: &Context<'a, T>, type_
 	Ok(result)
 }
 
-async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_property: String, nest_result: &mut T::Object,
-		expanded_item: T, options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<()>  where
+async fn compact_item<T, F, R>(active_context: &Context<'_, T>, item_active_property: String, nest_result: &mut T::Object,
+		expanded_item: T, options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<()>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let container = active_context.term_definitions.get(item_active_property.as_str())
@@ -296,11 +296,11 @@ async fn compact_item<'a, T, F, R>(active_context: &Context<'a, T>, item_active_
 	Ok(())
 }
 
-async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_active_property: String,
+async fn compact_node_or_set<T, F, R>(active_context: &Context<'_, T>, item_active_property: String,
 		nest_result: &mut T::Object, mut expanded_item: T, mut compacted_item: T,
-		container: BTreeSet<String>, options: &JsonLdOptionsImpl<'a, T, F, R>, as_array: bool) -> Result<()>  where
+		container: BTreeSet<String>, options: &JsonLdOptionsImpl<'_, T, F, R>, as_array: bool) -> Result<()>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	if_chain! {
@@ -381,8 +381,8 @@ async fn compact_node_or_set<'a, T, F, R>(active_context: &Context<'a, T>, item_
 	Ok(())
 }
 
-fn get_nest_result<'a, 'b, T>(active_context: &Context<'a, T>, item_active_property: &str,
-		result: &'b mut T::Object) -> Result<&'b mut T::Object> where
+fn get_nest_result<'a, T>(active_context: &Context<T>, item_active_property: &str,
+		result: &'a mut T::Object) -> Result<&'a mut T::Object> where
 	T: ForeignMutableJson + BuildableJson
 {
 	if let Some(nest_term) = active_context.term_definitions.get(item_active_property)
@@ -399,10 +399,10 @@ fn get_nest_result<'a, 'b, T>(active_context: &Context<'a, T>, item_active_prope
 	}
 }
 
-pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, options: &JsonLdOptions<T, F, R>,
+pub fn compact_iri<T, F, R>(active_context: &Context<T>, var: &str, options: &JsonLdOptions<T, F, R>,
 		mut value: Option<&T>, vocab: bool, reverse: bool) -> Result<String> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));
@@ -625,10 +625,10 @@ pub fn compact_iri<'a, T, F, R>(active_context: &Context<'a, T>, var: &str, opti
 	Ok(var.to_string())
 }
 
-fn compact_value<'a, T, F, R>(active_context: &Context<'a, T>, active_property: Option<&str>, mut value: T::Object,
+fn compact_value<T, F, R>(active_context: &Context<T>, active_property: Option<&str>, mut value: T::Object,
 		options: &JsonLdOptions<T, F, R>) -> Result<T> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	let term_definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
