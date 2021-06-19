@@ -2,15 +2,19 @@
 
 use std::error::Error;
 use std::borrow::Cow;
+use std::sync::Arc;
 
-use futures::future::FutureExt;
+use futures::{FutureExt, stream, StreamExt, TryStreamExt};
+use tokio::sync::Semaphore;
+use tokio_util::sync::PollSemaphore;
+
 use json_ld_rs_stable as stable;
 use json_ld_rs::{
 	compact, expand,
-	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdProcessingMode
+	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdProcessingMode, RemoteDocument
 };
-use json_ld_rs::remote::load_remote;
-use json_ld_rs::error::JsonLdErrorCode;
+use json_ld_rs::remote::{load_remote, LoadDocumentOptions, default_document_loader};
+use json_ld_rs::error::{JsonLdError, JsonLdErrorCode};
 use serde_json::{Value, Map};
 use url::Url;
 use regex::Regex;
@@ -22,10 +26,10 @@ mod util;
 
 use crate::util::json_ld_eq;
 use crate::util::type_state::*;
-use crate::util::record::TestRecord;
+use crate::util::record::{*, TestRecordKind::*, TestFailure::*};
 
 #[derive(Debug)]
-enum JsonLdTestError {
+pub enum JsonLdTestError {
 	InvalidManifest(&'static str),
 	JsonLdError(JsonLdErrorCode)
 }
@@ -40,103 +44,113 @@ impl Error for JsonLdTestError {}
 
 lazy_static! {
 	static ref FILTER: Regex = Regex::new(std::env::args().nth(1).as_deref().unwrap_or("")).unwrap();
+	static ref REQUESTS: Arc<Semaphore> = Arc::new(Semaphore::new(20));
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 	println!();
-	evaluate_json_ld(&stable::JsonLdInput::Reference("https://w3c.github.io/json-ld-api/tests/manifest.jsonld".to_string()),
-		&mut TestRecord { pass: 0, fail: 0, skip: 0 }, 0).await?;
-	println!();
+	print!("{}", evaluate_json_ld(
+		&stable::JsonLdInput::Reference("https://w3c.github.io/json-ld-api/tests/manifest.jsonld".to_string())
+	).await?.unwrap());
 	Ok(())
 }
 
 #[async_recursion(?Send)]
-async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>, record: &mut TestRecord, depth: usize) -> Result<(), Box<dyn Error>> {
+async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>) -> Result<Option<TestRecord>, Box<dyn Error>> {
 	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri.clone()) } else { None })
 		.map(|base| Url::parse(&base)).transpose()?;
 	let value = stable::expand(value, &stable::JsonLdOptions::<_>::default()).await?;
 	for item in value {
 		if let Value::Object(item) = item {
-			evaluate_object(item, record, &base_iri, depth).await?;
+			return evaluate_object(item, &base_iri).await;
 		} else {
 			unreachable!();
 		}
 	}
-	Ok(())
+	Ok(None)
 }
 
 #[async_recursion(?Send)]
-async fn evaluate_object(mut value: Map<String, Value>, record: &mut TestRecord,
-		base: &Option<Url>, depth: usize) -> Result<(), Box<dyn Error>> {
+async fn evaluate_object(mut value: Map<String, Value>, base: &Option<Url>) -> Result<Option<TestRecord>, Box<dyn Error>> {
 	// println!("Evaluating {:#?}", value);
 	if let Some(types) = value.remove("@type") {
-		evaluate_typed_object(value, types.as_array().unwrap(), TypeState::Initial, record, base, depth).await?;
+		return Some(evaluate_typed_object(value, types.as_array().unwrap(), TypeState::Initial, base).await).transpose();
 	}
-	Ok(())
+	Err(JsonLdTestError::InvalidManifest("found an untyped object").into())
 }
 
 #[async_recursion(?Send)]
-async fn evaluate_typed_object(value: Map<String, Value>, types: &[Value], mut state: TypeState, record: &mut TestRecord,
-		base: &Option<Url>, depth: usize) -> Result<(), Box<dyn Error>> {
+async fn evaluate_typed_object(value: Map<String, Value>, types: &[Value], mut state: TypeState,
+		base: &Option<Url>) -> Result<TestRecord, Box<dyn Error>> {
 	if let Some(ty) = types.get(0) {
 		if let Some(ty) = ty.as_str() {
 			state.register(ty);
-			evaluate_typed_object(value, &types[1..], state, record, base, depth).await
+			evaluate_typed_object(value, &types[1..], state, base).await
 		} else {
 			panic!("invalid @type value: {}", ty)
 		}
 	} else {
 		match state {
-			TypeState::Manifest => evaluate_manifest(value, record, base, depth).await,
-			TypeState::Test(Some(test_type), Some(test_class), is_html) =>
-				Ok(evaluate_test(value, test_type, test_class, is_html, record, base, depth).await?),
+			TypeState::Manifest => evaluate_manifest(value, base).await,
+			TypeState::Test(Some(test_type), Some(test_class), is_html) => {
+				match evaluate_test(value, test_type, test_class, is_html, base).await {
+					Ok(record) => Ok(record),
+					Err(err) => Ok(TestRecord { name: None, content: Fail(TestError(err)) })
+				}
+			},
 			_ => panic!("unexpected end of @type types")
 		}
 	}
 }
 
 #[async_recursion(?Send)]
-async fn evaluate_manifest(mut value: Map<String, Value>, parent_record: &mut TestRecord,
-		base: &Option<Url>, depth: usize) -> Result<(), Box<dyn Error>> {
-	if let Some(name) = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name") {
-		println!("{}Evaluating {}", "    ".repeat(depth),
-			name.as_array().unwrap().iter()
-				.map(|name| name["@value"].to_string()).intersperse_with(|| ", ".to_string()).collect::<String>());
-	}
+async fn evaluate_manifest(mut value: Map<String, Value>, base: &Option<Url>) -> Result<TestRecord, Box<dyn Error>> {
+	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
+			.map(|v| v.pointer("/0/@value").and_then(|name| name.as_str())
+			.ok_or(JsonLdTestError::InvalidManifest("invalid name"))).transpose()?.map(|name| name.to_string());
+	let mut records = TestRecords::new();
 	if let Some(Value::Array(sequence)) = value.remove("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#entries")
-	 		.map(|mut sequence| sequence.as_array_mut().unwrap().remove(0).as_object_mut().unwrap().remove("@list").unwrap()){
-		let mut record = TestRecord { pass: 0, fail: 0, skip: 0 };
-		for item in sequence {
-			if let Value::Object(value) = item {
-				if let Some(url) = value.get("@id").and_then(|url| url.as_str())
-						.map(|url| Url::options().base_url(base.as_ref()).parse(&url)).transpose()? {
-					if base.as_ref().map_or(true, |base| base.as_str() != &url[..url::Position::AfterQuery]) {
-						evaluate_json_ld(&stable::JsonLdInput::Reference(url.to_string()),
-							&mut record, depth + 1).await?;
-						continue;
-					}
+	 		.map(|mut sequence| sequence.as_array_mut().unwrap().remove(0).as_object_mut().unwrap().remove("@list").unwrap()) {
+		records = sequence.into_iter().map(|item| evaluate_manifest_entry(item, base))
+			.collect::<stream::FuturesOrdered<_>>()
+			.try_fold(records, |mut records, record| async {
+				if let Some(record) = record { records.add(record); }
+				Ok(records)
+			}).await?;
+	}
+	Ok(TestRecord { name, content: Group(records) })
+}
+
+async fn evaluate_manifest_entry(entry: Value, base: &Option<Url>) -> Result<Option<TestRecord>, Box<dyn Error>> {
+	Ok(if let Value::Object(value) = entry {
+		if let Some(url) = value.get("@id").and_then(|url| url.as_str())
+				.map(|url| Url::options().base_url(base.as_ref()).parse(&url)).transpose()? {
+			if base.as_ref().map_or(true, |base| base.as_str() != &url[..url::Position::AfterQuery]) {
+				if let Some(record) = evaluate_json_ld(&stable::JsonLdInput::Reference(url.to_string())).await? {
+					return Ok(Some(record));
+				} else {
+					return Ok(None);
 				}
-				evaluate_object(value, &mut record, base, depth + 1).await?;
-			} else {
-				panic!("invalid item in sequence");
 			}
 		}
-		println!("{}{} passed; {} failed; {} skipped", "    ".repeat(depth), record.pass, record.fail, record.skip);
-		parent_record.pass += record.pass;
-		parent_record.fail += record.fail;
-		parent_record.skip += record.skip;
-	}
-	Ok(())
+		if let Some(record) = evaluate_object(value, base).await? {
+			Some(record)
+		} else {
+			None
+		}
+	} else {
+		None
+	})
 }
 
 async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, _is_html: bool,
-		record: &mut TestRecord, base: &Option<Url>, depth: usize) -> Result<(), JsonLdTestError> {
+		base: &Option<Url>) -> Result<TestRecord, JsonLdTestError> {
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
-			.and_then(|v| v.pointer("/0/@value")).and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid name"))?;
-	if !FILTER.is_match(value["@id"].as_str().unwrap()) && !FILTER.is_match(name) {
-		record.skip += 1;
-		return Ok(());
+			.map(|v| v.pointer("/0/@value").and_then(|name| name.as_str())
+			.ok_or(JsonLdTestError::InvalidManifest("invalid name"))).transpose()?.map(|name| name.to_string());
+	if !FILTER.is_match(value["@id"].as_str().unwrap()) && name.as_ref().map_or(true, |name| !FILTER.is_match(name)) {
+		return Ok(TestRecord { name, content: Skip });
 	}
 	let options = value.get("https://w3c.github.io/json-ld-api/tests/vocab#option").and_then(|options| options.get(0));
 	if let Some(options) = options {
@@ -144,8 +158,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		 		options.get("https://w3c.github.io/json-ld-api/tests/vocab#contentType").is_some() ||
 				options.get("https://w3c.github.io/json-ld-api/tests/vocab#redirectTo").is_some() ||
 				options.get("https://w3c.github.io/json-ld-api/tests/vocab#httpStatus").is_some() {
-			record.skip += 1;
-			return Ok(());
+			return Ok(TestRecord { name, content: Skip });
 		}
 	}
 	let options = evaluate_option(options)?;
@@ -160,7 +173,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 				.map(|context| Url::options().base_url(base.as_ref()).parse(context))
 				.ok_or(JsonLdTestError::InvalidManifest("invalid context"))?.map_err(|_| JsonLdTestError::InvalidManifest("invalid context url"))?;
 			let context = load_remote(context.as_str(),
-				&JsonLdOptions::<_>::default(), None, vec![]).await
+				&options, None, vec![]).await
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
 			let context = match context {
@@ -181,10 +194,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 			std::panic::AssertUnwindSafe(expand(&input, &options)).catch_unwind().await
 				.map(|output| output.map(|output| Value::Array(output)))
 		},
-		_ => {
-			record.skip += 1;
-			return Ok(())
-		}
+		_ => return Ok(TestRecord { name, content: Skip })
 	};
 	match output {
 		Ok(output) => match output {
@@ -196,27 +206,24 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
 						let target = load_remote(
 							Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target url"))?.as_str(),
-							&JsonLdOptions::<_>::default(), None, vec![]).await
+							&options, None, vec![]).await
 							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
 							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
 						if json_ld_eq(&output, &target, false) {
-							record.pass += 1;
+							Ok(TestRecord { name, content: Pass })
 						} else {
-							eprintln!("{}Assert failed at test {}: {} != {}", "    ".repeat(depth), name, output, target);
-							record.fail += 1;
+							Ok(TestRecord { name, content: Fail(AssertFailure(output.to_string(), target.to_string()))})
 						}
 					},
-					TestType::PositiveSyntaxTest => record.pass += 1,
+					TestType::PositiveSyntaxTest => Ok(TestRecord { name, content: Pass }),
 					TestType::NegativeEvaluationTest => {
 						let target = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#result")
 							.and_then(|v| v.pointer("/0/@value"))
 							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
-						eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, output);
-						record.fail += 1;
+						Ok(TestRecord { name, content: Fail(AssertFailure(output.to_string(), target.to_string()))})
 					},
 					TestType::NegativeSyntaxTest => {
-						eprintln!("{}Assert failed at test {}: expected an error, {}", "    ".repeat(depth), name, output);
-						record.fail += 1;
+						Ok(TestRecord { name, content: Fail(AssertFailure(output.to_string(), "an error".to_string()))})
 					}
 				}
 			},
@@ -227,30 +234,24 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 							.and_then(|v| v.pointer("/0/@value"))
 							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
 						if &err.code.to_string() == target {
-							record.pass += 1;
+							Ok(TestRecord { name, content: Pass })
 						} else {
-							eprintln!("{}Assert failed at test {}: expected {}, {}", "    ".repeat(depth), name, target, err.code);
-							record.fail += 1;
+							Ok(TestRecord { name, content: Fail(AssertFailure(err.code.to_string(), target.to_string()))})
 						}
 					},
-					TestType::NegativeSyntaxTest => record.pass += 1,
-					_ => {
-						eprintln!("{}Error at test {}: {}", "    ".repeat(depth), name, err);
-						record.fail += 1;
-					}
+					TestType::NegativeSyntaxTest => Ok(TestRecord { name, content: Pass }),
+					_ => Ok(TestRecord { name, content: Fail(Error(err.to_string()))})
 				}
 			}
 		},
 		Err(panic) => {
 			if let Some(s) = panic.downcast_ref::<&str>() {
-				eprintln!("{}Testing {}: {}", "    ".repeat(depth), name, s);
+				Ok(TestRecord { name, content: Fail(Error(s.to_string()))})
 			} else {
-				eprintln!("A panic occurred at test {}", name);
+				Ok(TestRecord { name, content: Fail(UnknownPanic)})
 			}
-			record.fail += 1;
 		}
 	}
-	Ok(())
 }
 
 fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptions<'_, Value>, JsonLdTestError> {
@@ -258,6 +259,7 @@ fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptions<'_, Value
 		base: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#base")
 			.and_then(|v| v.pointer("/0/@value")).map(|base| base.as_str().map(|base| base.to_string())
 			.ok_or(JsonLdTestError::InvalidManifest("invalid base iri")))).transpose()?,
+		document_loader: Some(|url, options| limited_concurrency_loader(url, options)),
 		expand_context: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#expandContext")
 			.and_then(|v| v.pointer("/0/@value"))
 			.map(|context| context.as_str().map(|context| JsonOrReference::Reference(Cow::Borrowed(context)))
@@ -270,4 +272,10 @@ fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptions<'_, Value
 			})).transpose()?.unwrap_or(JsonLdProcessingMode::JsonLd1_1),
 		..JsonLdOptions::default()
 	})
+}
+
+#[async_recursion]
+async fn limited_concurrency_loader(url: &str, options: &Option<LoadDocumentOptions>) -> Result<RemoteDocument<Value>, JsonLdError> {
+	let _lock = PollSemaphore::new(REQUESTS.clone()).into_future().await;
+	default_document_loader(url, options).await
 }
