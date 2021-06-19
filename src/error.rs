@@ -5,7 +5,7 @@ use std::{fmt, fmt::Display};
 pub struct JsonLdError {
 	pub code: JsonLdErrorCode,
 	pub description: Option<String>,
-	pub cause: Option<Box<dyn Error>>
+	pub cause: Option<Box<dyn Error + Send + Sync + 'static>>
 }
 
 #[derive(Debug)]

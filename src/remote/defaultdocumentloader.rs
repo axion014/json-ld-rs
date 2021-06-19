@@ -28,7 +28,7 @@ fn process_link_headers<'a>(response: &'a Response, url: &'a url::Url) -> impl I
 	})
 }
 
-#[async_recursion(?Send)]
+#[async_recursion]
 pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocumentOptions>) ->
 		Result<RemoteDocument<T>, JsonLdError> where
 	T: ForeignMutableJson + BuildableJson
