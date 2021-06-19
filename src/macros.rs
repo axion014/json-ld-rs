@@ -22,7 +22,7 @@ macro_rules! expand_iri {
 	};
 	($active_context:expr,$value:expr,$document_relative:expr,$vocab:expr) => {
 		// FIXME: Waiting for Never type to arrive
-		expand_iri::<_, fn(&_, &_) -> _, std::future::Pending<_>>(
+		expand_iri::<_, for<'doc> fn(&'doc str, &'doc Option<LoadDocumentOptions>) -> BoxFuture<'doc, Result<RemoteDocument<T>>>>(
 			crate::expand::IRIExpansionArguments::Normal($active_context), $value, $document_relative, $vocab)
 	};
 }

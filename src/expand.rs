@@ -1,6 +1,7 @@
 use std::collections::{HashMap, BTreeMap, BTreeSet};
-use std::future::Future;
 use std::borrow::Cow;
+
+use futures::future::BoxFuture;
 
 use json_trait::{ForeignMutableJson, BuildableJson, typed_json::{self, *}, Object, Array, MutableObject, json};
 use cc_traits::{Get, GetMut, MapInsert, PushBack, Len, Remove};
@@ -35,11 +36,10 @@ fn empty_vec<T>() -> &'static Vec<T> {
 }
 
 #[async_recursion(?Send)]
-pub(crate) async fn expand_internal<'a, T, F, R>(active_context: &Context<'a, T>, active_property: Option<&'a str>, element: T,
-		base_url: Option<&'a Url>, options: &JsonLdOptionsImpl<T, F, R>, from_map: bool) -> Result<Owned<T>>  where
+pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, active_property: Option<&'a str>, element: T,
+		base_url: Option<&'a Url>, options: &JsonLdOptionsImpl<T, F>, from_map: bool) -> Result<Owned<T>>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
-	R: Future<Output = Result<RemoteDocument<T>>> + Clone
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
 	let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
 	let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
@@ -189,13 +189,12 @@ pub(crate) async fn expand_internal<'a, T, F, R>(active_context: &Context<'a, T>
 }
 
 #[async_recursion(?Send)]
-async fn expand_object<'a, T, F, R>(result: &mut T::Object,
+async fn expand_object<'a, T, F>(result: &mut T::Object,
 		active_context: &Context<T>, type_scoped_context: &Context<T>, active_property: Option<&'a str>,
 		element: impl MutableObject<T> + 'a, base_url: Option<&'a Url>, input_type: &Option<String>,
-		options: &JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
+		options: &JsonLdOptionsImpl<'a, T, F>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
-	R: Future<Output = Result<RemoteDocument<T>>> + Clone
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
 	let mut nests = BTreeMap::new();
 
@@ -359,11 +358,10 @@ fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option
 	}
 }
 
-async fn expand_index_map<T, F, R>(map_context: &Context<'_, T>, key: &str, index_map: impl MutableObject<T>, index_key: &str,
-		as_graph: bool, property_index: bool, base_url: Option<&Url>, options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<T::Array> where
+async fn expand_index_map<T, F>(map_context: &Context<'_, T>, key: &str, index_map: impl MutableObject<T>, index_key: &str,
+		as_graph: bool, property_index: bool, base_url: Option<&Url>, options: &JsonLdOptionsImpl<'_, T, F>) -> Result<T::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
-	R: Future<Output = Result<RemoteDocument<T>>> + Clone
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	let mut result = T::empty_array();
 	for (index, index_value) in index_map {
@@ -441,12 +439,11 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(map_context: &Conte
 	Ok(index_value)
 }
 
-async fn expand_nested_value<T, F, R>(result: &mut T::Object, nested_value: &T::Object,
+async fn expand_nested_value<T, F>(result: &mut T::Object, nested_value: &T::Object,
 		active_context: &Context<'_, T>, type_scoped_context: &Context<'_, T>, active_property: Option<&str>,
-		base_url: Option<&Url>, input_type: &Option<String>, options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<()> where
+		base_url: Option<&Url>, input_type: &Option<String>, options: &JsonLdOptionsImpl<'_, T, F>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
-	R: Future<Output = Result<RemoteDocument<T>>> + Clone
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	for (key, _) in nested_value.iter() {
 		if expand_iri!(active_context, key)?.as_deref() == Some("@value") { return Err(err!(InvalidNestValue)); }
@@ -454,13 +451,12 @@ async fn expand_nested_value<T, F, R>(result: &mut T::Object, nested_value: &T::
 	expand_object(result, active_context, type_scoped_context, active_property, nested_value.clone(), base_url, input_type, options).await
 }
 
-async fn expand_keyword<T, F, R>(result: &mut T::Object, nests: &mut BTreeMap<String, T>,
+async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<String, T>,
 		active_context: &Context<'_, T>, type_scoped_context: &Context<'_, T>, active_property: Option<&str>,
 		key: String, value: T, base_url: Option<&Url>, input_type: &Option<String>,
-		options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<()> where
+		options: &JsonLdOptionsImpl<'_, T, F>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R + Clone,
-	R: Future<Output = Result<RemoteDocument<T>>> + Clone
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	if active_property == Some("@reverse") { return Err(err!(InvalidReversePropertyMap)); }
 	match key.as_str() {
@@ -611,24 +607,22 @@ async fn expand_keyword<T, F, R>(result: &mut T::Object, nests: &mut BTreeMap<St
 	return Ok(());
 }
 
-pub enum IRIExpansionArguments<'a, 'b, T, F, R> where
+pub enum IRIExpansionArguments<'a, 'b, T, F> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> BoxFuture<'c, Result<RemoteDocument<T>>>
 {
 	DefineTerms {
 		active_context: &'a mut Context<'b, T>,
 		local_context: &'a T::Object,
 		defined: &'a mut HashMap<String, bool>,
-		options: &'a JsonLdOptions<'a, T, F, R>
+		options: &'a JsonLdOptions<'b, T, F>
 	},
 	Normal(&'a Context<'b, T>)
 }
 
-impl <T, F, R> IRIExpansionArguments<'_, '_, T, F, R> where
+impl <T, F> IRIExpansionArguments<'_, '_, T, F> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>>
 {
 	fn active_context(&self) -> &Context<T> {
 		match self {
@@ -638,11 +632,10 @@ impl <T, F, R> IRIExpansionArguments<'_, '_, T, F, R> where
 	}
 }
 
-pub fn expand_iri<T, F, R>(mut args: IRIExpansionArguments<T, F, R>, value: &str,
+pub fn expand_iri<T, F>(mut args: IRIExpansionArguments<T, F>, value: &str,
 		document_relative: bool, vocab: bool) -> Result<Option<String>> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>>
 {
 	if is_jsonld_keyword(value) { return Ok(Some(value.to_string())) }
 	if looks_like_a_jsonld_keyword(value) { return Ok(None) }

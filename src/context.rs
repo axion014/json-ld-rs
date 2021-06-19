@@ -1,10 +1,9 @@
 use std::collections::{HashMap, BTreeSet};
-use std::future::Future;
 use std::borrow::Cow;
 
 use elsa::FrozenSet;
 
-use futures::{future, stream, StreamExt, TryStreamExt};
+use futures::{future::{self, BoxFuture}, stream, StreamExt, TryStreamExt};
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Object, Array};
 use cc_traits::{Get, MapInsert, Remove};
@@ -69,13 +68,12 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 }
 
 #[async_recursion(?Send)]
-pub(crate) async fn process_context<'a, 'b, T, F, R>(
+pub(crate) async fn process_context<'a, 'b, T, F>(
 		active_context: &'b Context<'a, T>, local_context: &OptionalContexts<T>, base_url: Option<&'b Url>,
-		options: &JsonLdOptionsImpl<T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
+		options: &JsonLdOptionsImpl<'a, T, F>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> BoxFuture<'c, Result<RemoteDocument<T>>>
 {
 	let mut result = active_context.clone();
 	result.inverse_context.take();
@@ -219,12 +217,11 @@ pub(crate) async fn process_context<'a, 'b, T, F, R>(
 	}).await
 }
 
-pub fn create_term_definition<T, F, R>(
-		active_context: &mut Context<T>, local_context: &T::Object, term: &str, value: Borrowed<T>, defined: &mut HashMap<String, bool>,
-		options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
+pub fn create_term_definition<'a, T, F>(
+		active_context: &mut Context<'a, T>, local_context: &T::Object, term: &str, value: Borrowed<T>, defined: &mut HashMap<String, bool>,
+		options: &JsonLdOptions<'a, T, F>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
 {
 	if let Some(defined) = defined.get(term) {
 		if *defined { return Ok(()); }
