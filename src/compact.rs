@@ -20,7 +20,7 @@ use crate::expand::expand_iri;
 use crate::util::{resolve, make_lang_dir, is_graph_object, add_value};
 
 #[async_recursion(?Send)]
-pub async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>,
+pub(crate) async fn compact_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>,
 		element: T, options: &'b JsonLdOptionsImpl<'a, T, F, R>) -> Result<T> where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,

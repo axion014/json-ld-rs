@@ -35,7 +35,7 @@ fn empty_vec<T>() -> &'static Vec<T> {
 }
 
 #[async_recursion(?Send)]
-pub async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>, element: T,
+pub(crate) async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>, element: T,
 		base_url: Option<&'b Url>, options: &'b JsonLdOptionsImpl<'a, T, F, R>, from_map: bool) -> Result<Owned<T>>  where
 	T: ForeignMutableJson + BuildableJson,
 	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,

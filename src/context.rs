@@ -69,7 +69,7 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 }
 
 #[async_recursion(?Send)]
-pub async fn process_context<'a, 'b, T, F, R>(
+pub(crate) async fn process_context<'a, 'b, T, F, R>(
 		active_context: &'b Context<'a, T>, local_context: &'b OptionalContexts<'a, T>, base_url: Option<&'b Url>,
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
