@@ -20,13 +20,11 @@ use url::Url;
 mod macros;
 
 pub mod error;
-mod remote;
+pub mod remote;
 mod context;
 mod compact;
 mod expand;
 mod util;
-
-pub use crate::remote::load_remote;
 
 use crate::context::process_context;
 use crate::compact::{compact_internal, compact_iri};

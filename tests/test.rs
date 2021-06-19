@@ -7,8 +7,9 @@ use futures::future::FutureExt;
 use json_ld_rs_stable as stable;
 use json_ld_rs::{
 	compact, expand,
-	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdOptionsWithoutDocumentLoader, JsonLdProcessingMode, load_remote
+	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdOptionsWithoutDocumentLoader, JsonLdProcessingMode
 };
+use json_ld_rs::remote::load_remote;
 use json_ld_rs::error::JsonLdErrorCode;
 use serde_json::{Value, Map};
 use url::Url;
