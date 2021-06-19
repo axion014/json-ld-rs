@@ -19,7 +19,7 @@ pub async fn load_remote<'a, T, F, R>(iri: &str, options: &JsonLdOptions<'a, T, 
 	profile: Option<String>, request_profile: Vec<String>) ->
 		Result<RemoteDocument<T>, JsonLdError> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>, JsonLdError>>
 {
 	let load_document_options = Some(LoadDocumentOptions {

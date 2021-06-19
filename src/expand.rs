@@ -38,7 +38,7 @@ fn empty_vec<T>() -> &'static Vec<T> {
 pub(crate) async fn expand_internal<'a: 'b, 'b, T, F, R>(active_context: &'b Context<'a, T>, active_property: Option<&'b str>, element: T,
 		base_url: Option<&'b Url>, options: &'b JsonLdOptionsImpl<'a, T, F, R>, from_map: bool) -> Result<Owned<T>>  where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
@@ -194,7 +194,7 @@ async fn expand_object<'a, T, F, R>(result: &mut T::Object,
 		element: impl MutableObject<T> + 'a, base_url: Option<&'a Url>, input_type: &Option<String>,
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let mut nests = BTreeMap::new();
@@ -362,7 +362,7 @@ fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option
 async fn expand_index_map<T, F, R>(map_context: &Context<'_, T>, key: &str, index_map: impl MutableObject<T>, index_key: &str,
 		as_graph: bool, property_index: bool, base_url: Option<&Url>, options: &JsonLdOptionsImpl<'_, T, F, R>) -> Result<T::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let mut result = T::empty_array();
@@ -445,7 +445,7 @@ async fn expand_nested_value<'a, T, F, R>(result: &mut T::Object, nested_value: 
 		active_context: &'a Context<'a, T>, type_scoped_context: &Context<'a, T>, active_property: Option<&str>,
 		base_url: Option<&Url>, input_type: &Option<String>, options: &'a JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	for (key, _) in nested_value.iter() {
@@ -459,7 +459,7 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 		key: String, value: T, base_url: Option<&Url>, input_type: &Option<String>,
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
 	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	if active_property == Some("@reverse") { return Err(err!(InvalidReversePropertyMap)); }
@@ -613,7 +613,7 @@ async fn expand_keyword<'a, T, F, R>(result: &mut T::Object, nests: &mut BTreeMa
 
 pub enum IRIExpansionArguments<'a, 'b: 'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	DefineTerms {
@@ -627,7 +627,7 @@ pub enum IRIExpansionArguments<'a, 'b: 'a, T, F, R> where
 
 impl <'a, 'b: 'a, T, F, R> IRIExpansionArguments<'a, 'b, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	fn active_context(&'a self) -> &'a Context<'b, T> {
@@ -641,7 +641,7 @@ impl <'a, 'b: 'a, T, F, R> IRIExpansionArguments<'a, 'b, T, F, R> where
 pub fn expand_iri<'a, 'b: 'a, T, F, R>(mut args: IRIExpansionArguments<'a, 'b, T, F, R>, value: &'a str,
 		document_relative: bool, vocab: bool) -> Result<Option<String>> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	if is_jsonld_keyword(value) { return Ok(Some(value.to_string())) }

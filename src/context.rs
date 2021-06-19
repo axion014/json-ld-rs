@@ -74,7 +74,7 @@ pub(crate) async fn process_context<'a, 'b, T, F, R>(
 		options: &'a JsonLdOptionsImpl<'a, T, F, R>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	let mut result = active_context.clone();
@@ -223,7 +223,7 @@ pub fn create_term_definition<T, F, R>(
 		active_context: &mut Context<T>, local_context: &T::Object, term: &str, value: Borrowed<T>, defined: &mut HashMap<String, bool>,
 		options: &JsonLdOptions<T, F, R>, base_url: Option<&Url>, protected: bool, override_protected: bool) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	if let Some(defined) = defined.get(term) {

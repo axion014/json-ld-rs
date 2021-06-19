@@ -175,8 +175,8 @@ pub enum JsonLdProcessingMode {
 #[derive(Clone)]
 pub struct JsonLdOptions<'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	pub base: Option<String>,
 
@@ -222,8 +222,8 @@ impl <'a, T> Default for JsonLdOptionsWithoutDocumentLoader<'a, T> where
 
 impl <'a, T, F, R> JsonLdOptions<'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	pub fn with_document_loader(document_loader: F) -> Self {
 		JsonLdOptions {
@@ -251,8 +251,8 @@ struct LoadedContext<T: ForeignMutableJson + BuildableJson> {
 
 struct JsonLdOptionsImpl<'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	inner: &'a JsonLdOptions<'a, T, F, R>,
 	loaded_contexts: MaybeOwned<'a, FrozenMap<Url, Box<LoadedContext<T>>>>
@@ -260,8 +260,8 @@ struct JsonLdOptionsImpl<'a, T, F, R> where
 
 impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a, T, F, R> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<RemoteDocument<T>>> + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	fn from(value: &'a JsonLdOptions<'a, T, F, R>) -> Self {
 		JsonLdOptionsImpl {
@@ -274,8 +274,8 @@ impl <'a, T, F, R> From<&'a JsonLdOptions<'a, T, F, R>> for JsonLdOptionsImpl<'a
 pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
 		options: &'a JsonLdOptions<'a, T, F, R>) -> Result<T::Object> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
-	R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let options: JsonLdOptionsImpl<'a, T, F, R> = options.into();
 	let input = if let JsonLdInput::Reference(iri) = input {
@@ -360,8 +360,8 @@ pub async fn compact<'a, T, F, R>(input: &JsonLdInput<T>, ctx: Option<JsonLdCont
 pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: &JsonLdOptions<'a, T, F, R>) ->
 		Result<<T as ForeignJson>::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
-	R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	expand_with_loaded_contexts(input, options.into()).await
 }
@@ -369,8 +369,8 @@ pub async fn expand<'a, T, F, R>(input: &JsonLdInput<T>, options: &JsonLdOptions
 async fn expand_with_loaded_contexts<'a, T, F, R>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'a, T, F, R>) ->
 		Result<<T as ForeignJson>::Array> where
 	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + Clone + 'a,
-	R: Future<Output = Result<crate::RemoteDocument<T>>> + Clone + 'a
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R + Clone,
+	R: Future<Output = Result<RemoteDocument<T>>> + Clone
 {
 	let input = if let JsonLdInput::Reference(iri) = input {
 		Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options.inner, None, Vec::new()).await?))
