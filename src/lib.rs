@@ -172,8 +172,10 @@ pub enum JsonLdProcessingMode {
 	JsonLd1_0
 }
 
+type DefaultFuture<T> = std::future::Pending<Result<RemoteDocument<T>>>;
+
 #[derive(Clone)]
-pub struct JsonLdOptions<'a, T, F, R> where
+pub struct JsonLdOptions<'a, T, F = for<'b> fn(&'b str, &'b Option<LoadDocumentOptions>) -> DefaultFuture<T>, R = DefaultFuture<T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
 	R: Future<Output = Result<RemoteDocument<T>>>
@@ -195,11 +197,10 @@ pub struct JsonLdOptions<'a, T, F, R> where
 	pub use_rdf_type: bool
 }
 
-type DefaultFuture<T> = std::future::Pending<Result<RemoteDocument<T>>>;
-pub type JsonLdOptionsWithoutDocumentLoader<'a, T> =
-	JsonLdOptions<'a, T, fn(&str, &Option<LoadDocumentOptions>) -> DefaultFuture<T>, DefaultFuture<T>>;
-impl <'a, T> Default for JsonLdOptionsWithoutDocumentLoader<'a, T> where
-	T: ForeignMutableJson + BuildableJson
+impl <'a, T, F, R> Default for JsonLdOptions<'a, T, F, R> where
+	T: ForeignMutableJson + BuildableJson,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
+	R: Future<Output = Result<RemoteDocument<T>>>
 {
 	fn default() -> Self {
 		JsonLdOptions {
@@ -207,30 +208,6 @@ impl <'a, T> Default for JsonLdOptionsWithoutDocumentLoader<'a, T> where
 			compact_arrays: true,
 			compact_to_relative: true,
 			document_loader: None,
-			expand_context: None,
-			extract_all_scripts: false,
-			frame_expansion: false,
-			ordered: false,
-			processing_mode: JsonLdProcessingMode::JsonLd1_1,
-			produce_generalized_rdf: true,
-			rdf_direction: None,
-			use_native_types: false,
-			use_rdf_type: false
-		}
-	}
-}
-
-impl <'a, T, F, R> JsonLdOptions<'a, T, F, R> where
-	T: ForeignMutableJson + BuildableJson,
-	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> R,
-	R: Future<Output = Result<RemoteDocument<T>>>
-{
-	pub fn with_document_loader(document_loader: F) -> Self {
-		JsonLdOptions {
-			base: None,
-			compact_arrays: true,
-			compact_to_relative: true,
-			document_loader: Some(document_loader),
 			expand_context: None,
 			extract_all_scripts: false,
 			frame_expansion: false,

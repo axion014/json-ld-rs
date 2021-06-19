@@ -7,7 +7,7 @@ use futures::future::FutureExt;
 use json_ld_rs_stable as stable;
 use json_ld_rs::{
 	compact, expand,
-	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdOptionsWithoutDocumentLoader, JsonLdProcessingMode
+	JsonLdInput, JsonOrReference, JsonLdOptions, JsonLdProcessingMode
 };
 use json_ld_rs::remote::load_remote;
 use json_ld_rs::error::JsonLdErrorCode;
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>, record: &mut TestRecord, depth: usize) -> Result<(), Box<dyn Error>> {
 	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri.clone()) } else { None })
 		.map(|base| Url::parse(&base)).transpose()?;
-	let value = stable::expand(value, &stable::JsonLdOptions::default()).await?;
+	let value = stable::expand(value, &stable::JsonLdOptions::<_>::default()).await?;
 	for item in value {
 		if let Value::Object(item) = item {
 			evaluate_object(item, record, &base_iri, depth).await?;
@@ -160,7 +160,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 				.map(|context| Url::options().base_url(base.as_ref()).parse(context))
 				.ok_or(JsonLdTestError::InvalidManifest("invalid context"))?.map_err(|_| JsonLdTestError::InvalidManifest("invalid context url"))?;
 			let context = load_remote(context.as_str(),
-				&JsonLdOptions::default(), None, vec![]).await
+				&JsonLdOptions::<_>::default(), None, vec![]).await
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
 			let context = match context {
@@ -196,7 +196,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 							.and_then(|input| input.as_str()).ok_or(JsonLdTestError::InvalidManifest("invalid target"))?;
 						let target = load_remote(
 							Url::options().base_url(base.as_ref()).parse(target).map_err(|_| JsonLdTestError::InvalidManifest("invalid target url"))?.as_str(),
-							&JsonLdOptions::default(), None, vec![]).await
+							&JsonLdOptions::<_>::default(), None, vec![]).await
 							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?.document.to_parsed()
 							.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
 						if json_ld_eq(&output, &target, false) {
@@ -253,7 +253,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 	Ok(())
 }
 
-fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptionsWithoutDocumentLoader<'_, Value>, JsonLdTestError> {
+fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptions<'_, Value>, JsonLdTestError> {
 	Ok(JsonLdOptions {
 		base: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#base")
 			.and_then(|v| v.pointer("/0/@value")).map(|base| base.as_str().map(|base| base.to_string())
