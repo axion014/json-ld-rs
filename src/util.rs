@@ -7,7 +7,7 @@ use cc_traits::{Get, GetMut, MapInsert, PushBack, Remove};
 use url::{Url, ParseError};
 
 use crate::{OptionalContexts, JsonOrReference};
-use crate::error::{JsonLdError, JsonLdErrorCode::InvalidContextEntry};
+use crate::error::{JsonLdError, JsonLdErrorCode::InvalidLocalContext};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
 	value.starts_with('@') && value.len() > 1 && match &value[1..] {
@@ -95,12 +95,12 @@ pub fn map_context<T: ForeignMutableJson + BuildableJson>(ctx: Cow<T>) -> Result
 				Owned::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Owned(obj))),
 				Owned::String(reference) => Some(JsonOrReference::Reference(Cow::Owned(reference))),
 				Owned::Null => None,
-				_ => return Err(err!(InvalidContextEntry))
+				_ => return Err(err!(InvalidLocalContext))
 			})).collect(),
 			Owned::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Owned(ctx)))]),
 			Owned::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Owned(reference)))]),
 			Owned::Null => Ok(vec![None]),
-			_ => Err(err!(InvalidContextEntry))
+			_ => Err(err!(InvalidLocalContext))
 		},
 		Cow::Borrowed(ctx) => match ctx.as_enum() {
 			Borrowed::Array(ctx) => ctx.iter().map(|value| Ok(match value.as_enum() {
@@ -108,12 +108,12 @@ pub fn map_context<T: ForeignMutableJson + BuildableJson>(ctx: Cow<T>) -> Result
 				Borrowed::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Borrowed(obj))),
 				Borrowed::String(reference) => Some(JsonOrReference::Reference(Cow::Borrowed(reference))),
 				Borrowed::Null => None,
-				_ => return Err(err!(InvalidContextEntry))
+				_ => return Err(err!(InvalidLocalContext))
 			})).collect(),
 			Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(ctx)))]),
 			Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(reference)))]),
 			Borrowed::Null => Ok(vec![None]),
-			_ => Err(err!(InvalidContextEntry))
+			_ => Err(err!(InvalidLocalContext))
 		}
 	}
 }
