@@ -111,14 +111,14 @@ pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, a
 										.map(|definition| (term, &definition.context))).transpose()
 								}).collect::<Result<BTreeMap<_, _>>>()? {
 							active_context = Cow::Owned(process_context(&active_context, &context,
-								active_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
+								type_scoped_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
 								options, &FrozenSet::new(), false, false, true).await?);
 						}
 					} else if let Some(term) = value.as_string() {
 						input_type = expand_iri!(&active_context, term)?;
 						if let Some(context) = type_scoped_context.term_definitions.get(term).map(|definition| &definition.context) {
 							active_context = Cow::Owned(process_context(&active_context, &context,
-								active_context.term_definitions.get(term).unwrap().base_url.as_ref(),
+								type_scoped_context.term_definitions.get(term).unwrap().base_url.as_ref(),
 								options, &FrozenSet::new(), false, false, true).await?);
 						}
 					}
