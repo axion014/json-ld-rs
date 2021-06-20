@@ -205,8 +205,8 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 			.filter(|(_, key, _)| key.as_ref().map_or(true, |key| key.contains(':') || is_jsonld_keyword(&key))) {
 		let expanded_property = expanded_property?;
 		if is_jsonld_keyword(&expanded_property) {
-			expand_keyword(result, &mut nests, &active_context, &type_scoped_context, active_property, expanded_property, value,
-				base_url, &input_type, options).await?;
+			expand_keyword(result, &mut nests, &active_context, &type_scoped_context, active_property,
+				key, expanded_property, value, base_url, &input_type, options).await?;
 			continue;
 		}
 		let definition = active_context.term_definitions.get(key.as_str());
@@ -453,13 +453,13 @@ async fn expand_nested_value<T, F>(result: &mut T::Object, nested_value: &T::Obj
 
 async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<String, T>,
 		active_context: &Context<'_, T>, type_scoped_context: &Context<'_, T>, active_property: Option<&str>,
-		key: String, value: T, base_url: Option<&Url>, input_type: &Option<String>,
+		key: String, expanded_property: String, value: T, base_url: Option<&Url>, input_type: &Option<String>,
 		options: &JsonLdOptionsImpl<'_, T, F>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	if active_property == Some("@reverse") { return Err(err!(InvalidReversePropertyMap)); }
-	match key.as_str() {
+	match expanded_property.as_str() {
 		"@type" => {
 			if options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_0 && result.contains(&key) {
 				return Err(err!(CollidingKeywords));
@@ -467,15 +467,15 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 			match value.into_enum() {
 				Owned::String(iri) => {
 					let iri = expand_iri!(type_scoped_context, &iri, true)?.map_or(T::null(), |iri| iri.into());
-					add_value(result, &key, iri, false);
+					add_value(result, &expanded_property, iri, false);
 				},
 				Owned::Array(array) => {
 					let expanded = array.iter().map(|iri| iri.as_string().ok_or(err!(InvalidTypeValue))).flat_map(|iri| iri.map(|iri|
 						Ok(expand_iri!(type_scoped_context, &iri, true)?.map_or(T::null(), |iri| iri.into()))));
-					for iri in expanded { add_value(result, &key, iri?, false); }
+					for iri in expanded { add_value(result, &expanded_property, iri?, false); }
 				},
 				Owned::Object(obj) if options.inner.frame_expansion => {
-					result.insert(key, if obj.is_empty() {
+					result.insert(expanded_property, if obj.is_empty() {
 						obj.into()
 					} else if let Some(default) = obj.get("@default").and_then(|default| default.as_string()) {
 						json!(T, {"@default": expand_iri!(type_scoped_context, default, true)?.map_or(T::null(), |default| default.into())})
@@ -486,11 +486,11 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 				_ => return Err(err!(InvalidTypeValue))
 			}
 		},
-		"@included" if options.inner.processing_mode != JsonLdProcessingMode::JsonLd1_0 => add_value(result, &key,
+		"@included" if options.inner.processing_mode != JsonLdProcessingMode::JsonLd1_0 => add_value(result, &expanded_property,
 			expand_internal(active_context, None, value, base_url, options, false).await?.into_untyped(), true),
-		_ if result.contains(&key) => return Err(err!(CollidingKeywords)),
+		_ if result.contains(&expanded_property) => return Err(err!(CollidingKeywords)),
 		"@id" => {
-			result.insert(key, match value.into_enum() {
+			result.insert(expanded_property, match value.into_enum() {
 				Owned::String(iri) => expand_iri!(active_context, &iri, true, false)?.map_or(T::null(), |iri| iri.into()),
 				Owned::Array(array) if options.inner.frame_expansion => {
 					array.iter().map(|iri| iri.as_string().ok_or(err!(InvalidIdValue))).flat_map(|iri| iri.map(|iri|
@@ -503,14 +503,14 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 		},
 		"@graph" => {
 			let expanded_value = expand_internal(active_context, Some("@graph"), value, base_url, options, false).await?;
-			result.insert(key, if let Owned::Array(array) = expanded_value {
+			result.insert(expanded_property, if let Owned::Array(array) = expanded_value {
 				array.into()
 			} else {
 				json!(T, [expanded_value.into_untyped()])
 			});
 		},
 		"@value" => {
-			result.insert(key, if input_type.as_deref() == Some("@json") {
+			result.insert(expanded_property, if input_type.as_deref() == Some("@json") {
 				if options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_0 {
 					return Err(err!(InvalidValueObjectValue));
 				}
@@ -528,7 +528,7 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 			});
 		},
 		"@language" => {
-			result.insert(key, match value.into_enum() {
+			result.insert(expanded_property, match value.into_enum() {
 				Owned::String(lang) => lang.into(),
 				Owned::Array(array) if options.inner.frame_expansion => {
 					array.iter().map(|lang| lang.as_string().ok_or(err!(InvalidLanguageTaggedString)).map(|lang| lang.into()))
@@ -539,7 +539,7 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 			});
 		},
 		"@direction" => {
-			result.insert(key, match value.into_enum() {
+			result.insert(expanded_property, match value.into_enum() {
 				Owned::String(dir) => {
 					if dir != "ltr" && dir != "rtl" { return Err(err!(InvalidBaseDirection)); }
 					dir.into()
@@ -556,7 +556,7 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 		},
 		"@index" => {
 			if let Some(value) = value.as_string() {
-				result.insert(key, value.into());
+				result.insert(expanded_property, value.into());
 			} else {
 				return Err(err!(InvalidIndexValue))
 			}
@@ -564,12 +564,12 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 		"@list" => {
 			match active_property {
 				None | Some("@graph") => {},
-				_ => add_value(result, &key, expand_internal(active_context, active_property, value, base_url, options, false)
+				_ => add_value(result, &expanded_property, expand_internal(active_context, active_property, value, base_url, options, false)
 					.await?.into_untyped(), true)
 			}
 		},
 		"@set" => {
-			result.insert(key, expand_internal(active_context, active_property, value, base_url, options, false).await?.into_untyped());
+			result.insert(expanded_property, expand_internal(active_context, active_property, value, base_url, options, false).await?.into_untyped());
 		}
 		"@reverse" => {
 			if value.as_object().is_some() {
@@ -600,7 +600,7 @@ async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<Strin
 			}
 		},
 		"@nest" => {
-			nests.insert(key, T::empty_array().into());
+			nests.insert(key, value);
 		},
 		_ => {}
 	}
