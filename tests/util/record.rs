@@ -36,7 +36,8 @@ impl TestRecord {
 				if let Some(name) = &self.name { write!(f, " at test {}", name)? }
 				match failure {
 					TestFailure::TestError(err) => write!(f, ": {}", err)?,
-					TestFailure::AssertFailure(actual, expected) => write!(f, ": expected {}, {}", expected, actual)?,
+					TestFailure::AssertFailure(actual, expected) => write!(f, ":\n{}    expected {}\n{}    recieved {}",
+						indent, expected, indent, actual)?,
 					TestFailure::Error(err) => write!(f, ": {}", err)?,
 					TestFailure::UnknownPanic => ()
 				}
