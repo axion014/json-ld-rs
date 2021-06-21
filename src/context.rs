@@ -6,7 +6,7 @@ use elsa::FrozenSet;
 use futures::{future::{self, BoxFuture}, stream, StreamExt, TryStreamExt};
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, Object, Array};
-use cc_traits::{Get, MapInsert, Remove};
+use cc_traits::{Len, Get, Remove, MapInsert};
 
 use url::Url;
 use async_recursion::async_recursion;
@@ -123,7 +123,7 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
 			}
 			if let Some(import_url) = json.get("@import") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(InvalidContextEntry)); }
 				if let Some(import_url) = import_url.as_string() {
 					let import = resolve(import_url, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 					let import = load_remote(import.as_str(), options.inner,
@@ -176,7 +176,7 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 				result.default_base_direction = process_direction(value, true)?;
 			}
 			if json.contains("@propagate") {
-				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(ProcessingModeConflict)); }
+				if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode { return Err(err!(InvalidContextEntry)); }
 			}
 
 			let mut defined = HashMap::<String, bool>::new();
@@ -193,7 +193,8 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 						// but doing it here is preferred, because minimizing async part of the code help keep things simple
 						if value.get_attr("@context").is_some() {
 							process_context(&result, &result.term_definitions.get(key).unwrap().context,
-								base_url, options, remote_contexts, true, true, false).await?;
+								base_url, options, remote_contexts, true, true, false).await
+								.map_err(|e| err!(InvalidScopedContext, , e))?;
 						}
 					}
 				}
@@ -232,6 +233,7 @@ pub fn create_term_definition<'a, T, F>(
 	if term == "@type" {
 		if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(KeywordRedefinition)); }
 		if let Borrowed::Object(value) = value {
+			if value.is_empty() { return Err(err!(KeywordRedefinition)); }
 			for (key, value) in value.iter() {
 				match key {
 					"@container" if value.as_string() == Some("@set") => (),
@@ -267,7 +269,7 @@ pub fn create_term_definition<'a, T, F>(
 	let mut process_id = |id, simple_term| {
 		if let Some(id) = id {
 			if id != term {
-				if looks_like_a_jsonld_keyword(id) { return Ok(()) }
+				if !is_jsonld_keyword(id) && looks_like_a_jsonld_keyword(id) { return Ok(()) }
 				definition.iri = process_context_iri!(active_context, id, local_context, defined, options)?;
 				if term.starts_with(":") || term.ends_with(":") || term.contains("/") {
 					*defined.get_mut(term).unwrap() = true;
@@ -335,7 +337,7 @@ pub fn create_term_definition<'a, T, F>(
 				if let Some(ref ty) = ty {
 					match ty.as_str() {
 						"@json" | "@none" => {
-							if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
+							if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTypeMapping)); }
 						},
 						"@id" | "@vocab" => {},
 						_ => if !is_iri(ty) { return Err(err!(InvalidTypeMapping)); }
@@ -348,6 +350,7 @@ pub fn create_term_definition<'a, T, F>(
 				let reverse = reverse.as_string().ok_or(err!(InvalidIRIMapping))?;
 				if looks_like_a_jsonld_keyword(reverse) { return Ok(()) }
 				definition.iri = process_context_iri!(active_context, reverse, local_context, defined, options)?;
+				if !is_iri(definition.iri.as_ref().unwrap()) { return Err(err!(InvalidIRIMapping)); }
 				if let Some(container) = value.get("@container") {
 					definition.container_mapping = match container.as_enum() {
 						Borrowed::String(container) => {

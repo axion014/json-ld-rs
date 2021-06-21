@@ -19,7 +19,7 @@ pub fn is_jsonld_keyword(value: &str) -> bool {
 }
 
 pub fn looks_like_a_jsonld_keyword(value: &str) -> bool {
-	value.starts_with('@') && value.len() > 1 && !value[1..].contains(|ch: char| ch.is_ascii_alphabetic())
+	value.starts_with('@') && value.len() > 1 && !value[1..].contains(|ch: char| !ch.is_ascii_alphabetic())
 }
 
 pub fn resolve(r: &str, base: Option<&Url>) -> Result<Url, ParseError> {
