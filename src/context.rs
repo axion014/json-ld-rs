@@ -71,7 +71,7 @@ fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
 pub(crate) async fn process_context<'a, 'b, T, F>(
 		active_context: &'b Context<'a, T>, local_context: &OptionalContexts<T>, base_url: Option<&'b Url>,
 		options: &JsonLdOptionsImpl<'a, T, F>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
-		mut propagate: bool, validate_scoped_context: bool) -> Result<Context<'a, T>> where
+		mut propagate: bool, mut validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'c> Fn(&'c str, &'c Option<LoadDocumentOptions>) -> BoxFuture<'c, Result<RemoteDocument<T>>>
 {
@@ -89,25 +89,33 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 	local_context.iter().map(|context| async move {
 		Ok(Some(match context {
 			Some(JsonOrReference::Reference(iri)) => {
-				let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
-				if validate_scoped_context == false && remote_contexts.contains(&context) { return Ok(None); }
-				if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
-				remote_contexts.insert(Box::new(context.clone()));
-				let loaded_context = if let Some(loaded_context) = options.loaded_contexts.get(&context) {
-					loaded_context
-				} else {
-					let context_document = load_remote(context.as_str(), options.inner,
-						Some("http://www.w3.org/ns/json-ld#context".to_string()),
-						vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
-						.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
-					let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
-					let loaded_context = context_document.document.to_parsed()
-						.map_err(|e| err!(LoadingRemoteContextFailed, , e))?
-						.as_object_mut()
-						.and_then(|obj| obj.remove("@context"))
-						.and_then(|ctx| ctx.into_object())
-						.ok_or(err!(InvalidRemoteContext))?;
-					options.loaded_contexts.insert(context, Box::new(LoadedContext { context: loaded_context, base_url }))
+				let mut iri = Cow::Borrowed(&**iri);
+				let loaded_context = loop {
+					let context = resolve(&iri, base_url).map_err(|e| err!(LoadingDocumentFailed, , e))?;
+					if validate_scoped_context == false && remote_contexts.contains(&context) { return Ok(None); }
+					if remote_contexts.len() > MAX_CONTEXTS { return Err(err!(ContextOverflow)); }
+					remote_contexts.insert(Box::new(context.clone()));
+					if let Some(loaded_context) = options.loaded_contexts.get(&context) {
+						break loaded_context;
+					} else {
+						let context_document = load_remote(context.as_str(), options.inner,
+							Some("http://www.w3.org/ns/json-ld#context".to_string()),
+							vec!["http://www.w3.org/ns/json-ld#context".to_string()]).await
+							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+						let base_url = Url::parse(&context_document.document_url).map_err(|e| err!(LoadingRemoteContextFailed, , e))?;
+						let loaded_context = context_document.document.to_parsed()
+							.map_err(|e| err!(LoadingRemoteContextFailed, , e))?
+							.as_object_mut()
+							.and_then(|obj| obj.remove("@context"));
+						match loaded_context.map(|ctx| ctx.into_enum()) {
+							Some(Owned::Object(ctx)) => {
+								break options.loaded_contexts.insert(context, Box::new(LoadedContext { context: ctx, base_url }));
+							},
+							Some(Owned::String(redirection_iri)) => iri = Cow::Owned(redirection_iri),
+							_ => return Err(err!(InvalidRemoteContext))
+						};
+						validate_scoped_context = false;
+					};
 				};
 				Some((Cow::Borrowed(&loaded_context.context), Some(&loaded_context.base_url)))
 			},
