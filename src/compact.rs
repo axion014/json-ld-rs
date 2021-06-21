@@ -43,12 +43,9 @@ pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, 
 					"@graph" | "@set" => return Ok(result.into()),
 					_ => {}
 				}
-				if let Some(container_mapping) = active_context.term_definitions.get(active_property)
+				if let Some(container) = active_context.term_definitions.get(active_property)
 						.and_then(|term_definition| term_definition.container_mapping.as_ref()) {
-					if container_mapping.iter().any(|container_mapping| match container_mapping.as_str() {
-								"@list" | "@set" => true,
-								_ => false
-							}) {
+					if container.contains("@list") || container.contains("@set") {
 						return Ok(result.into())
 					}
 				}
@@ -82,10 +79,10 @@ pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, 
 			}
 			if_chain! {
 				if let Some(list) = obj.remove("@list");
-				if let Some(container_mapping) = active_property
+				if let Some(container) = active_property
 					.and_then(|property| active_context.term_definitions.get(property))
 					.and_then(|definition| definition.container_mapping.as_ref());
-				if container_mapping.iter().any(|container_mapping| container_mapping == "@list");
+				if container.contains("@list");
 				then { return compact_internal(&mut active_context, active_property, list, options).await; }
 			}
 			if let Some(expanded_types) = obj.get("@type") {
@@ -650,14 +647,14 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 			value.insert("@type".to_string(), T::null());
 		} else if value.get("@value").and_then(|value| value.as_string()).is_none() {
 			if !value.contains("@index") || term_definition.and_then(|definition| definition.container_mapping.as_ref())
-					.map_or(false, |containers| containers.iter().any(|container| container == "@index")) {
+					.map_or(false, |containers| containers.contains("@index")) {
 				return Ok(value.remove("@value").unwrap_or(T::null()));
 			}
 		} else if value.get("@language").and_then(|lang| lang.as_string()) == language.as_deref() &&
 				value.get("@direction").and_then(|direction| direction.as_string())
 					.map_or(direction.is_none(), |s| direction.map_or(false, |d| s == d.as_ref())) {
 			if !value.contains("@index") || term_definition.and_then(|definition| definition.container_mapping.as_ref())
-					.map_or(false, |containers| containers.iter().any(|container| container == "@index")) {
+					.map_or(false, |containers| containers.contains("@index")) {
 				return Ok(value.remove("@value").unwrap_or(T::null()));
 			}
 		}

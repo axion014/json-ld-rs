@@ -400,7 +400,7 @@ pub fn create_term_definition<'a, T, F>(
 					},
 					_ => return Err(err!(InvalidContainerMapping))
 				});
-				if definition.container_mapping.as_ref().unwrap().iter().any(|s| s == "@type") {
+				if definition.container_mapping.as_ref().unwrap().contains("@type") {
 					match definition.type_mapping.as_deref() {
 						None => definition.type_mapping = Some("@id".to_string()),
 						Some("@id") | Some("vocab") => {},
@@ -410,7 +410,7 @@ pub fn create_term_definition<'a, T, F>(
 			}
 			if let Some(index) = value.get("@index") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
-				if !definition.container_mapping.as_ref().map_or(false, |v| v.iter().any(|s| s == "@index")) {
+				if !definition.container_mapping.as_ref().map_or(false, |v| v.contains("@index")) {
 					return Err(err!(InvalidTermDefinition));
 				}
 				let index = index.as_string().ok_or(err!(InvalidTermDefinition))?;
