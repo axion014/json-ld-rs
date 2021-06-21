@@ -361,7 +361,9 @@ fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option
 		Owned::String(language_value) => {
 			let mut v: T::Object = json!(T, {"@value": language_value});
 			if let Some(language) = language { v.insert("@language".to_string(), language.into()); }
-			if let Some(direction) = direction { v.insert("@direction".to_string(), direction.as_ref().into()); }
+			if let Some(direction) = direction {
+				if *direction != Direction::None { v.insert("@direction".to_string(), direction.as_ref().into()); }
+			}
 			Ok(Some(v))
 		},
 		_ => Err(err!(InvalidLanguageMapValue))
@@ -720,7 +722,7 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(
 		}
 		if let Some(direction) = definition.and_then(|definition| definition.direction_mapping.as_ref())
 				.or(active_context.default_base_direction.as_ref()) {
-			result.insert("@direction".to_string(), direction.as_ref().into());
+			if *direction != Direction::None { result.insert("@direction".to_string(), direction.as_ref().into()); }
 		}
 	}
 	result.insert("@value".to_string(), value.into_untyped());
