@@ -1,6 +1,4 @@
 #![feature(try_find)]
-#![feature(unboxed_closures)]
-#![feature(fn_traits)]
 
 use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::borrow::{Borrow, Cow};
