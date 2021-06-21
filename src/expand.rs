@@ -25,6 +25,7 @@ use crate::util::{
 	resolve, as_compact_iri, add_value, map_context
 };
 use crate::context::{process_context, create_term_definition};
+use crate::container::Container;
 
 // In absense of !(Never) type, a transmute is necessary
 fn empty_vec<T>() -> &'static Vec<T> {
@@ -56,8 +57,7 @@ pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, a
 					}, from_map).await?;
 				match expanded_item {
 					Owned::Array(array) => {
-						if definition.and_then(|definition| definition.container_mapping.as_ref())
-								.map_or(false, |container| container.contains("@list")) {
+						if let Some(Container::List) = definition.map(|definition| &definition.container_mapping) {
 							result.push_back(json!(T, {"@list": array}));
 						} else {
 							result.extend(array);
@@ -210,13 +210,13 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 			continue;
 		}
 		let definition = active_context.term_definitions.get(key.as_str());
-		let container_mapping = definition.and_then(|definition| definition.container_mapping.as_ref());
+		let container_mapping = definition.map_or(&container!(None), |definition| &definition.container_mapping);
 		let mut expanded_value = if definition.and_then(|definition| definition.type_mapping.as_deref()) == Some("@json") {
 			Owned::Object(json!(T, {"@value": value, "@type": "@json"}))
 		} else {
 			match value.into_enum() {
 				Owned::Object(obj) => {
-					if container_mapping.map_or(false, |container| container.contains("@language")) {
+					if let LanguageContainer!() = container_mapping {
 						let direction = definition.and_then(|definition| definition.direction_mapping.as_ref())
 							.or(active_context.default_base_direction.as_ref());
 						Owned::Array(if options.inner.ordered {
@@ -224,32 +224,25 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 						} else {
 							expand_language_map(active_context, obj, direction)?
 						})
-					} else if let Some(container) = container_mapping {
-						if let Some(index_key) = if container.contains("@index") {
-							Some(definition.and_then(|definition| definition.index_mapping.as_deref()).unwrap_or("@index"))
-						} else if container.contains("@type") {
-							Some("@type")
-						} else if container.contains("@id") {
-							Some("@id")
+					} else if let Some(index_key) = match container_mapping {
+						IndexContainer!() => Some(definition.and_then(|definition| definition.index_mapping.as_deref()).unwrap_or("@index")),
+						TypeContainer!() => Some("@type"),
+						IdContainer!() => Some("@id"),
+						_ => None
+					} {
+						let map_context = if let IndexContainer!() = container_mapping {
+							active_context
 						} else {
-							None
-						} {
-							let map_context = if container_mapping.unwrap().contains("@index") {
-								active_context
-							} else {
-								active_context.previous_context.as_deref().unwrap_or(active_context)
-							};
-							let as_graph = container_mapping.unwrap().contains("@graph");
-							let property_index = index_key != "@index" && container_mapping.unwrap().contains("@index");
-							Owned::Array(if options.inner.ordered {
-								expand_index_map(map_context, &key, obj.into_iter().collect::<BTreeMap<_, _>>(), index_key,
-									as_graph, property_index, base_url, options).await?
-							} else {
-								expand_index_map(map_context, &key, obj, index_key, as_graph, property_index, base_url, options).await?
-							})
+							active_context.previous_context.as_deref().unwrap_or(active_context)
+						};
+						let as_graph = container_mapping.is_graph();
+						let property_index = index_key != "@index" && container_mapping.is_index();
+						Owned::Array(if options.inner.ordered {
+							expand_index_map(map_context, &key, obj.into_iter().collect::<BTreeMap<_, _>>(), index_key,
+								as_graph, property_index, base_url, options).await?
 						} else {
-							expand_internal(&active_context, Some(&key), obj.into(), base_url, options, false).await?
-						}
+							expand_index_map(map_context, &key, obj, index_key, as_graph, property_index, base_url, options).await?
+						})
 					} else {
 						expand_internal(&active_context, Some(&key), obj.into(), base_url, options, false).await?
 					}
@@ -260,7 +253,7 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 			}
 		};
 		if let Owned::Null = expanded_value { continue; }
-		if container_mapping.map_or(false, |container| container.contains("@list")) {
+		if let Container::List = container_mapping {
 			if_chain! {
 				if let Owned::Object(ref obj) = expanded_value;
 				if obj.contains("@list");
@@ -275,8 +268,7 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 				}
 			}
 		}
-		if container_mapping.map_or(false, |container| container.contains("@graph") &&
-				!container.contains("@id") && !container.contains("@index")) {
+		if container_mapping.is_graph() && !container_mapping.is_id() && !container_mapping.is_index() {
 			let into_graph_object = |ev: T| {
 				Owned::Object(json!(T, {"@graph": if let Some(_) = ev.as_array() { ev } else { json!(T, [ev]) }}))
 			};

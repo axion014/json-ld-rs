@@ -1,5 +1,6 @@
-use std::collections::{HashMap, BTreeSet};
+use std::collections::HashMap;
 use std::borrow::Cow;
+use std::iter::once;
 
 use elsa::FrozenSet;
 
@@ -24,6 +25,7 @@ use crate::util::{
 use crate::error::{Result, JsonLdErrorCode::*, JsonLdError};
 use crate::remote::{load_remote, LoadDocumentOptions};
 use crate::expand::expand_iri;
+use crate::container::{Container, parse_container};
 
 const MAX_CONTEXTS: usize = 25; // The number's placeholder
 
@@ -47,24 +49,6 @@ fn process_direction<T: ForeignJson>(value: &T, nullify: bool) -> Result<Option<
 		Borrowed::Null => if nullify { None } else { Some(Direction::None) },
 		_ => return Err(err!(InvalidBaseDirection))
 	})
-}
-
-fn validate_container(container: BTreeSet<String>) -> Result<BTreeSet<String>> {
-	let len = container.len();
-	if container.contains("@graph") {
-		if container.iter().any(|s| s != "@graph" && s != "@id" && s != "@index" && s != "@set") {
-			return Err(err!(InvalidContainerMapping,
-				"@graph container can't be composed with container types other than @id, @index, and @set"));
-		}
-	} else if len > 1 {
-		if container.contains("@list") {
-			return Err(err!(InvalidContainerMapping, "@list container can't be composed with other container types"));
-		}
-		if !container.contains("@set") || len != 2 {
-			return Err(err!(InvalidContainerMapping));
-		}
-	}
-	Ok(container)
 }
 
 #[async_recursion(?Send)]
@@ -266,7 +250,7 @@ pub fn create_term_definition<'a, T, F>(
 		reverse_property: false,
 		base_url: None,
 		context: vec![],
-		container_mapping: None,
+		container_mapping: container!(None),
 		direction_mapping: None,
 		index_mapping: None,
 		language_mapping: None,
@@ -360,18 +344,12 @@ pub fn create_term_definition<'a, T, F>(
 				definition.iri = process_context_iri!(active_context, reverse, local_context, defined, options)?;
 				if !is_iri(definition.iri.as_ref().unwrap()) { return Err(err!(InvalidIRIMapping)); }
 				if let Some(container) = value.get("@container") {
-					definition.container_mapping = match container.as_enum() {
-						Borrowed::String(container) => {
-							match container.as_str() {
-								"@set" | "@index" => {
-									let mut set = BTreeSet::new();
-									set.insert(container.to_owned());
-									Some(set)
-								},
-								_ => return Err(err!(InvalidReverseProperty))
-							}
+					match container.as_enum() {
+						Borrowed::String(container) => match container.as_str() {
+							"@set" | "@index" => definition.container_mapping = parse_container(once(container.as_str()))?,
+							_ => return Err(err!(InvalidReverseProperty))
 						},
-						Borrowed::Null => None,
+						Borrowed::Null => (),
 						_ => return Err(err!(InvalidReverseProperty))
 					};
 				}
@@ -381,12 +359,11 @@ pub fn create_term_definition<'a, T, F>(
 				return Ok(());
 			}
 			if let Some(container) = value.get("@container") {
-				definition.container_mapping = Some(match container.as_enum() {
+				definition.container_mapping = match container.as_enum() {
 					Borrowed::Array(container) if options.processing_mode != JsonLdProcessingMode::JsonLd1_0 => {
-						validate_container(
-							container.iter().map(|v| v.as_string().map(|s| s.to_string()).ok_or(err!(InvalidContainerMapping)))
-								.collect::<Result<BTreeSet<String>>>()?
-						)?
+						parse_container(container.iter()
+							.map(|v| v.as_string().ok_or(err!(InvalidContainerMapping)))
+							.collect::<Result<Vec<&str>>>()?)?
 					},
 					Borrowed::String(container) => {
 						if options.processing_mode == JsonLdProcessingMode::JsonLd1_0 {
@@ -394,13 +371,11 @@ pub fn create_term_definition<'a, T, F>(
 								return Err(err!(InvalidContainerMapping));
 							}
 						}
-						let mut set = BTreeSet::new();
-						set.insert(container.to_owned());
-						validate_container(set)?
+						parse_container(once(container.as_str()))?
 					},
 					_ => return Err(err!(InvalidContainerMapping))
-				});
-				if definition.container_mapping.as_ref().unwrap().contains("@type") {
+				};
+				if let TypeContainer!() = definition.container_mapping {
 					match definition.type_mapping.as_deref() {
 						None => definition.type_mapping = Some("@id".to_string()),
 						Some("@id") | Some("vocab") => {},
@@ -410,7 +385,7 @@ pub fn create_term_definition<'a, T, F>(
 			}
 			if let Some(index) = value.get("@index") {
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode { return Err(err!(InvalidTermDefinition)); }
-				if !definition.container_mapping.as_ref().map_or(false, |v| v.contains("@index")) {
+				if !definition.container_mapping.is_index() {
 					return Err(err!(InvalidTermDefinition));
 				}
 				let index = index.as_string().ok_or(err!(InvalidTermDefinition))?;
@@ -489,9 +464,8 @@ pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_cont
 			continue;
 		};
 		let key = key.0.as_str();
-		let container = value.container_mapping.as_ref()
-			.map_or_else(|| "@none".to_string(), |container| container.iter().map(|s| s.as_str()).collect());
-		let type_language_map = container_map.entry_ownable(&container).or_insert_with(|| {
+		// concat all containers
+		let type_language_map = container_map.entry_ownable(&value.container_mapping).or_insert_with(|| {
 			let mut type_language_map = HashMap::new();
 			type_language_map.insert("@language".to_string(), HashMap::new());
 			type_language_map.insert("@type".to_string(), HashMap::new());
@@ -527,13 +501,13 @@ pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_cont
 }
 
 pub fn select_term<'a, T>(active_context: &'a Context<T>,
-		var: &str, containers: Vec<&str>, type_language: &str, preferred_values: Vec<&str>) -> Option<&'a str> where
+		var: &str, containers: Vec<Container>, type_language: &str, preferred_values: Vec<&str>) -> Option<&'a str> where
 	T: ForeignMutableJson + BuildableJson
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));
 	let container_map = inverse_context.get(var).unwrap();
 	// dbg!(container_map, type_language, &preferred_values);
-	containers.iter().filter_map(|container| container_map.get(*container))
+	containers.iter().filter_map(|container| container_map.get(container))
 		.map(|type_language_map| type_language_map.get(type_language).unwrap())
 		.find_map(|value_map| preferred_values.iter()
 			.find_map(|preferred_value| value_map.get(*preferred_value).map(|s| s.as_str())))

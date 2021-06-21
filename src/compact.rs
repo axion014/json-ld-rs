@@ -18,6 +18,7 @@ use crate::remote::LoadDocumentOptions;
 use crate::error::{Result, JsonLdErrorCode::{IRIConfusedWithPrefix, InvalidNestValue}};
 use crate::context::{process_context, create_inverse_context, select_term};
 use crate::expand::expand_iri;
+use crate::container::{Container, UnorderedContainer, ContainerKind, GraphContainer};
 use crate::util::{resolve, make_lang_dir, is_graph_object, add_value};
 
 #[async_recursion(?Send)]
@@ -43,11 +44,9 @@ pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, 
 					"@graph" | "@set" => return Ok(result.into()),
 					_ => {}
 				}
-				if let Some(container) = active_context.term_definitions.get(active_property)
-						.and_then(|term_definition| term_definition.container_mapping.as_ref()) {
-					if container.contains("@list") || container.contains("@set") {
-						return Ok(result.into())
-					}
+				let container = active_context.term_definitions.get(active_property).map(|definition| &definition.container_mapping);
+				if let Some(Container::List | Container::Unordered(UnorderedContainer { is_set: true, .. })) = container {
+					return Ok(result.into())
 				}
 			}
 			Ok(result.remove(0).unwrap())
@@ -79,10 +78,9 @@ pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, 
 			}
 			if_chain! {
 				if let Some(list) = obj.remove("@list");
-				if let Some(container) = active_property
+				if let Some(Container::List) = active_property
 					.and_then(|property| active_context.term_definitions.get(property))
-					.and_then(|definition| definition.container_mapping.as_ref());
-				if container.contains("@list");
+					.map(|definition| &definition.container_mapping);
 				then { return compact_internal(&mut active_context, active_property, list, options).await; }
 			}
 			if let Some(expanded_types) = obj.get("@type") {
@@ -146,9 +144,9 @@ async fn compact_map<T, F>(active_context: &Context<'_, T>, type_scoped_context:
 					_ => panic!()
 				};
 				let alias = compact_iri(active_context, "@type", options.inner, None, true, false)?;
-				let as_array = (options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_1 &&
-					active_context.term_definitions.get(alias.as_str()).and_then(|def| def.container_mapping.as_ref())
-					.map_or(false, |container| container.contains("@set"))) || !options.inner.compact_arrays;
+				let as_array = options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_1 &&
+					active_context.term_definitions.get(alias.as_str())
+					.map_or(false, |def| def.container_mapping.is_set()) || !options.inner.compact_arrays;
 				add_value(&mut result, &alias, compacted_value, as_array);
 			},
 			"@reverse" => {
@@ -158,8 +156,7 @@ async fn compact_map<T, F>(active_context: &Context<'_, T>, type_scoped_context:
 				for property in keys {
 					if let Some(term_definition) = active_context.term_definitions.get(property.as_str()) {
 						if term_definition.reverse_property {
-							let as_array = term_definition.container_mapping.as_ref()
-								.map_or(false, |container| container.contains("@set")) || !options.inner.compact_arrays;
+							let as_array = term_definition.container_mapping.is_set() || !options.inner.compact_arrays;
 							add_value(&mut result, &property, compacted_value.remove(&property).unwrap(), as_array);
 						}
 					}
@@ -176,8 +173,8 @@ async fn compact_map<T, F>(active_context: &Context<'_, T>, type_scoped_context:
 				}
 			},
 			"@index" if active_property.and_then(|active_property| active_context.term_definitions.get(active_property))
-					.and_then(|definition| definition.container_mapping.as_ref())
-					.map_or(false, |container| container.contains("@index")) => {},
+					.map(|definition| &definition.container_mapping)
+					.map_or(false, |container| container.is_index()) => {},
 			"@direction" | "@index" | "@language" | "@value" => {
 				let alias = compact_iri(active_context, expanded_property.as_str(), options.inner, None, true, false)?;
 				result.insert(alias, expanded_value.into());
@@ -210,33 +207,32 @@ async fn compact_item<T, F>(active_context: &Context<'_, T>, item_active_propert
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	let container = active_context.term_definitions.get(item_active_property.as_str())
-		.and_then(|term_definition| term_definition.container_mapping.clone())
-		.unwrap_or(BTreeSet::new());
-	let as_array = container.contains("@set") || item_active_property == "@graph" ||
+		.map_or(&container!(None), |term_definition| &term_definition.container_mapping);
+	let as_array = container.is_set() || item_active_property == "@graph" ||
 		item_active_property == "@list" || !options.inner.compact_arrays;
 	if expanded_item.as_object().is_some() {
 		let mut expanded_item = expanded_item.into_object().unwrap();
 		if let Some(list) = expanded_item.remove("@list") {
 			let compacted_item = compact_internal(active_context, Some(&item_active_property), list, options).await?;
 			let compacted_item = if compacted_item.as_array().is_some() {
-				compacted_item.into_array().unwrap()
+				compacted_item
 			} else {
 				json!(T, [compacted_item])
-			}.into();
-			if !container.contains("@list") {
+			};
+			if let Container::List = container {
+				nest_result.insert(item_active_property, compacted_item);
+			} else {
 				let mut obj = T::empty_object();
 				obj.insert(compact_iri(active_context, "@list", options.inner, None, true, false)?, compacted_item);
 				if let Some(value) = expanded_item.remove("@index") {
 					obj.insert(compact_iri(active_context, "@index", options.inner, None, true, false)?, value);
 				}
 				add_value::<T>(nest_result, &item_active_property, obj.into(), as_array);
-			} else {
-				nest_result.insert(item_active_property, compacted_item);
 			}
 		} else if is_graph_object::<T>(&expanded_item) {
 			let compacted_item = compact_internal(active_context, Some(&item_active_property),
 				expanded_item.remove("@graph").unwrap(), options).await?;
-			if container.contains("@graph") && container.contains("@id") {
+			if container.is_graph() && container.is_id() {
 				let map_object = nest_result.get_mut(&item_active_property);
 				let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
 					nest_result.insert(item_active_property.clone(), T::empty_object().into());
@@ -245,8 +241,8 @@ async fn compact_item<T, F>(active_context: &Context<'_, T>, item_active_propert
 				let id = expanded_item.get("@id").map(|id| id.as_string().unwrap());
 				let map_key = compact_iri(active_context, id.unwrap_or("@none"), options.inner, None, id.is_none(), false)?;
 				add_value(map_object, &map_key, compacted_item, as_array);
-			} else if container.contains("@graph") && !expanded_item.contains("@id") {
-				if container.contains("@index") {
+			} else if container.is_graph() && !expanded_item.contains("@id") {
+				if container.is_index() {
 					let map_object = nest_result.get_mut(&item_active_property);
 					let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
 						nest_result.insert(item_active_property.clone(), T::empty_object().into());
@@ -293,23 +289,26 @@ async fn compact_item<T, F>(active_context: &Context<'_, T>, item_active_propert
 
 async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_property: String,
 		nest_result: &mut T::Object, mut expanded_item: T, mut compacted_item: T,
-		container: BTreeSet<String>, options: &JsonLdOptionsImpl<'_, T, F>, as_array: bool) -> Result<()>  where
+		container: &Container, options: &JsonLdOptionsImpl<'_, T, F>, as_array: bool) -> Result<()>  where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	if_chain! {
-		if !container.contains("@graph");
-		if let Some(container) = container.get("@language").or_else(|| container.get("@index"))
-			.or_else(|| container.get("@id")).or_else(|| container.get("@type"));
+		if let Container::Unordered(UnorderedContainer {
+			kind: ContainerKind::GraphContainer(GraphContainer { kind: Some(_), is_graph: false }) |
+				ContainerKind::Language |
+				ContainerKind::Type,
+			..
+		}) = container;
 		then {
 			let map_object = nest_result.get_mut(&item_active_property);
 			let map_object = if let Some(map_object) = map_object { map_object.as_object_mut().unwrap() } else {
 				nest_result.insert(item_active_property.clone(), T::empty_object().into());
 				nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
 			};
-			let container_key = compact_iri(active_context, container, options.inner, None, true, false)?;
-			let map_key = match container.as_str() {
-				"@language" => Cow::Borrowed(if_chain! {
+			let container_key = compact_iri(active_context, container.get_kind_str().unwrap(), options.inner, None, true, false)?;
+			let map_key = match container {
+				LanguageContainer!() => Cow::Borrowed(if_chain! {
 					if let Some(expanded_item) = expanded_item.as_object_mut();
 					if let Some(value) = expanded_item.remove("@value");
 					then {
@@ -319,7 +318,7 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 						"@none"
 					}
 				}),
-				"@index" => if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
+				IndexContainer!() => if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
 								.and_then(|definition| definition.index_mapping.as_ref().cloned()) {
 					let container_key = compact_iri(active_context, &index_key, options.inner, None, true, false)?;
 					compacted_item.as_object_mut()
@@ -337,10 +336,10 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 				} else {
 					Cow::Borrowed(expanded_item.get_attr("@index").map_or("@none", |index| index.as_string().unwrap()))
 				},
-				"@id" => compacted_item.as_object_mut()
+				IdContainer!() => compacted_item.as_object_mut()
 					.and_then(|compacted_item| compacted_item.remove(&container_key))
 					.map_or(Cow::Borrowed("@none"), |map_key| Cow::Owned(map_key.into_string().unwrap())),
-				"@type" => {
+				TypeContainer!() => {
 					let map_key = compacted_item.as_object_mut()
 						.and_then(|compacted_item| compacted_item.remove(&container_key).map(|ty| (compacted_item, ty)))
 						.and_then(|(compacted_item, ty)| {
@@ -408,29 +407,26 @@ pub fn compact_iri<T, F>(active_context: &Context<T>, var: &str, options: &JsonL
 		let mut containers = Vec::new();
 		let mut type_language = "@language";
 		let mut type_language_value = "@null".to_string();
+
+		macro_rules! add_containers { ($($kind:ident),+) => { $(containers.push(container!($kind)));+ } }
+
 		if let Some(value) = value.and_then(|value| value.as_object()) {
-			if value.contains("@index") && !is_graph_object::<T>(value) {
-				containers.push("@index");
-				containers.push("@index@set");
-			}
+			if value.contains("@index") && !is_graph_object::<T>(value) { add_containers!(index, indexes); }
 		}
 		if reverse {
 			type_language = "@type";
 			type_language_value = "@reverse".to_string();
-			containers.push("@set");
+			containers.push(container!(set));
 		} else if let Some(value) = value {
 			let mut set_default = || {
 				type_language = "@type";
 				type_language_value = "@id".to_string();
-				containers.push("@id");
-				containers.push("@id@set");
-				containers.push("@type");
-				containers.push("@set@type");
+				add_containers!(id, ids, type, types);
 			};
 			if let Some(value) = value.as_object() {
 				if let Some(list) = value.get("@list") {
 					let list = list.as_array().unwrap();
-					if !value.contains("@index") { containers.push("@list"); }
+					if !value.contains("@index") { containers.push(container!(list)); }
 					let mut common_type = None;
 					let mut common_language = if list.len() == 0 { Some(default_language) } else { None };
 					for item in list.iter() {
@@ -475,27 +471,12 @@ pub fn compact_iri<T, F>(active_context: &Context<T>, var: &str, options: &JsonL
 						type_language_value = common_language;
 					}
 				} else if is_graph_object::<T>(value) {
-					if value.contains("@index") {
-						containers.push("@graph@index");
-						containers.push("@graph@index@set");
-					}
-					if value.contains("@id") {
-						containers.push("@graph@id");
-						containers.push("@graph@id@set");
-					}
-					containers.push("@graph");
-					containers.push("@graph@set");
-					containers.push("@set");
-					if !value.contains("@index") {
-						containers.push("@graph@index");
-						containers.push("@graph@index@set");
-					}
-					if !value.contains("@id") {
-						containers.push("@graph@id");
-						containers.push("@graph@id@set");
-					}
-					containers.push("@index");
-					containers.push("@index@set");
+					if value.contains("@index") { add_containers!(index_graph, indexes_graph); }
+					if value.contains("@id") { add_containers!(id_graph, ids_graph); }
+					add_containers!(graph, set_graph, set);
+					if !value.contains("@index") { add_containers!(index_graph, indexes_graph); }
+					if !value.contains("@id") { add_containers!(id_graph, ids_graph); }
+					add_containers!(index, indexes);
 					type_language = "@type";
 					type_language_value = "@id".to_string();
 				} else {
@@ -508,8 +489,7 @@ pub fn compact_iri<T, F>(active_context: &Context<T>, var: &str, options: &JsonL
 							if lang_dir != "";
 							then {
 								type_language_value = lang_dir;
-								containers.push("@language");
-								containers.push("@language@set");
+								add_containers!(language, languages);
 							} else {
 								if let Some(ty) = value.get("@type") {
 									type_language_value = ty.as_string().unwrap().to_string();
@@ -520,27 +500,20 @@ pub fn compact_iri<T, F>(active_context: &Context<T>, var: &str, options: &JsonL
 					} else {
 						set_default();
 					}
-					containers.push("@set");
+					containers.push(container!(set));
 				}
 			} else {
 				set_default();
-				containers.push("@set");
+				containers.push(container!(set));
 			}
 		}
-		containers.push("@none");
+		containers.push(container!(None));
 		if options.processing_mode != JsonLdProcessingMode::JsonLd1_0 {
 			if let Some(value) = value.and_then(|value| value.as_object()) {
-				if !value.contains("@index") {
-					containers.push("@index");
-					containers.push("@index@set");
-				}
-				if value.len() == 1 && value.contains("@value") {
-					containers.push("@language");
-					containers.push("@language@set");
-				}
+				if !value.contains("@index") { add_containers!(index, indexes); }
+				if value.len() == 1 && value.contains("@value") { add_containers!(language, languages); }
 			} else {
-				containers.push("@index");
-				containers.push("@index@set");
+				add_containers!(index, indexes);
 			}
 		}
 		let mut preferred_values = Vec::new();
@@ -590,8 +563,7 @@ pub fn compact_iri<T, F>(active_context: &Context<T>, var: &str, options: &JsonL
 	let mut compact_iri: Option<String> = None;
 	for (key, definition) in active_context.term_definitions.iter() {
 		let iri = definition.iri.as_ref();
-		if iri.is_none() || iri.unwrap() == var ||
-				!var.starts_with(iri.unwrap()) || !definition.prefix {
+		if iri.is_none() || iri.unwrap() == var || !var.starts_with(iri.unwrap()) || !definition.prefix {
 			continue;
 		}
 		let candidate: String = key.0.clone() + ":" + &var[iri.unwrap().len()..];
@@ -646,15 +618,15 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 		} else if type_mapping.as_deref() == Some("@none") {
 			value.insert("@type".to_string(), T::null());
 		} else if value.get("@value").and_then(|value| value.as_string()).is_none() {
-			if !value.contains("@index") || term_definition.and_then(|definition| definition.container_mapping.as_ref())
-					.map_or(false, |containers| containers.contains("@index")) {
+			if !value.contains("@index") || term_definition
+					.map_or(false, |definition| definition.container_mapping.is_index()) {
 				return Ok(value.remove("@value").unwrap_or(T::null()));
 			}
 		} else if value.get("@language").and_then(|lang| lang.as_string()) == language.as_deref() &&
 				value.get("@direction").and_then(|direction| direction.as_string())
 					.map_or(direction.is_none(), |s| direction.map_or(false, |d| s == d.as_ref())) {
-			if !value.contains("@index") || term_definition.and_then(|definition| definition.container_mapping.as_ref())
-					.map_or(false, |containers| containers.contains("@index")) {
+			if !value.contains("@index") || term_definition
+					.map_or(false, |definition| definition.container_mapping.is_index()) {
 				return Ok(value.remove("@value").unwrap_or(T::null()));
 			}
 		}

@@ -40,3 +40,75 @@ macro_rules! process_context_iri {
 		}, $value, $document_relative, $vocab)
 	};
 }
+
+macro_rules! container {
+	($kind:ident, $is_set:expr) => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::$kind, is_set: $is_set
+		})
+	};
+	(None, $is_set:expr, $is_graph:expr) => { container!(std::option::Option::None, $is_set, $is_graph) };
+	($kind:ident, $is_set:expr, $is_graph:expr) => {
+		container!(Some(crate::container::GraphContainerKind::$kind), $is_set, $is_graph)
+	};
+	($kind:expr, $is_set:expr, $is_graph:expr) => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::GraphContainer(crate::container::GraphContainer {
+				kind: $kind, is_graph: $is_graph
+			}), is_set: $is_set
+		})
+	};
+	(None) => { container!(None, false, false) };
+	(list) => { crate::container::Container::List };
+	(set) => { container!(None, true, false) };
+	(graph) => { container!(None, false, true) };
+	(set_graph) => { container!(None, true, true) };
+	(id) => { container!(Id, false, false) };
+	(index) => { container!(Index, false, false) };
+	(ids) => { container!(Id, true, false) };
+	(indexes) => { container!(Index, true, false) };
+	(id_graph) => { container!(Id, false, true) };
+	(index_graph) => { container!(Index, false, true) };
+	(ids_graph) => { container!(Id, true, true) };
+	(indexes_graph) => { container!(Index, true, true) };
+	(language) => { container!(Language, false) };
+	(type) => { container!(Type, false) };
+	(languages) => { container!(Language, true) };
+	(types) => { container!(Type, true) };
+}
+
+macro_rules! IdContainer {
+	() => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::GraphContainer(crate::container::GraphContainer {
+				kind: Some(crate::container::GraphContainerKind::Id), ..
+			}), ..
+		})
+	}
+}
+
+macro_rules! IndexContainer {
+	() => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::GraphContainer(crate::container::GraphContainer {
+				kind: Some(crate::container::GraphContainerKind::Index), ..
+			}), ..
+		})
+	}
+}
+
+macro_rules! LanguageContainer {
+	() => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::Language, ..
+		})
+	}
+}
+
+macro_rules! TypeContainer {
+	() => {
+		crate::container::Container::Unordered(crate::container::UnorderedContainer {
+			kind: crate::container::ContainerKind::Type, ..
+		})
+	}
+}

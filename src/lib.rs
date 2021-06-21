@@ -1,6 +1,6 @@
 #![feature(try_find)]
 
-use std::collections::{HashMap, BTreeMap, BTreeSet};
+use std::collections::{HashMap, BTreeMap};
 use std::borrow::{Borrow, Cow};
 
 use futures::future::BoxFuture;
@@ -23,6 +23,7 @@ pub mod remote;
 mod context;
 mod compact;
 mod expand;
+mod container;
 mod util;
 
 use crate::context::process_context;
@@ -30,6 +31,7 @@ use crate::compact::{compact_internal, compact_iri};
 use crate::expand::expand_internal;
 use crate::remote::LoadDocumentOptions;
 use crate::error::{Result, JsonLdErrorCode::*};
+use crate::container::Container;
 use crate::util::map_context;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -100,7 +102,7 @@ struct TermDefinition<'a, T> where
 	reverse_property: bool,
 	base_url: Option<Url>,
 	context: OptionalContexts<'a, T>,
-	container_mapping: Option<BTreeSet<String>>,
+	container_mapping: Container,
 	direction_mapping: Option<Direction>,
 	index_mapping: Option<String>,
 	language_mapping: Option<Option<String>>,
@@ -130,7 +132,7 @@ impl Borrow<str> for TermDefinitionKey {
 	}
 }
 
-type InverseContext = HashMap<String, HashMap<String, HashMap<String, HashMap<String, String>>>>;
+type InverseContext = HashMap<String, HashMap<Container, HashMap<String, HashMap<String, String>>>>;
 
 #[derive(Clone)]
 pub struct Context<'a, T> where
