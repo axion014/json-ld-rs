@@ -22,7 +22,7 @@ use crate::{
 use crate::error::{Result, JsonLdErrorCode::*};
 use crate::util::{
 	is_jsonld_keyword, looks_like_a_jsonld_keyword, is_iri, is_graph_object,
-	resolve_with_str, as_compact_iri, add_value, map_context
+	resolve, as_compact_iri, add_value, map_context
 };
 use crate::context::{process_context, create_term_definition};
 
@@ -682,10 +682,11 @@ pub fn expand_iri<T, F>(mut args: IRIExpansionArguments<T, F>, value: &str,
 		}
 	}
 	if document_relative {
-		return Ok(Some(
-			resolve_with_str(value, args.active_context().base_iri.as_ref().map(|s| s.as_str()))
-				.map_err(|e| err!(InvalidBaseIRI, , e))?.to_string()
-		));
+		if let Some(base) = args.active_context().base_iri.as_ref() {
+			return Ok(Some(
+				resolve(value, Some(base)).map_err(|e| err!(InvalidBaseIRI, , e))?.to_string()
+			));
+		}
 	}
 	Ok(Some(value.to_string()))
 }

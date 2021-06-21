@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 
 use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, Object, Array, typed_json::*, json};
 
@@ -24,10 +24,6 @@ pub fn looks_like_a_jsonld_keyword(value: &str) -> bool {
 
 pub fn resolve(r: &str, base: Option<&Url>) -> Result<Url, ParseError> {
 	Url::options().base_url(base).parse(r)
-}
-
-pub fn resolve_with_str<T: Borrow<str>>(r: &str, base: Option<T>) -> Result<Url, ParseError> {
-	resolve(r, base.map(|base| Url::parse(base.borrow())).transpose()?.as_ref())
 }
 
 pub fn is_iri(value: &str) -> bool {
