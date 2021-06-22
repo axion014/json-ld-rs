@@ -602,11 +602,18 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 		.or(active_context.default_base_direction.as_ref());
 	let type_mapping = term_definition.and_then(|definition| definition.type_mapping.as_deref());
 	let value = (|| {
-		if_chain! {
-			if value.len() == (if value.contains("@index") {2} else {1});
-			if let Some("@id") | Some("@vocab") = type_mapping;
-			if let Some(id) = value.remove("@id").map(|id| id.into_string().unwrap());
-			then { return Ok(compact_iri(active_context, &id, options, None, false, false)?.into()); }
+		if value.len() == (if value.contains("@index") {2} else {1}) {
+			if let Some(id) = value.remove("@id").map(|id| id.into_string().unwrap()) {
+				// Contrary to spec, we compact the IRI regardless of the type
+				return Ok(match type_mapping {
+					Some("@id") => compact_iri(active_context, &id, options, None, false, false)?.into(),
+					Some("@vocab") => compact_iri(active_context, &id, options, None, true, false)?.into(),
+					_ => {
+						value.insert("@id".to_string(), compact_iri(active_context, &id, options, None, false, false)?.into());
+						value.into()
+					}
+				});
+			}
 		}
 		if let Some(ty) = value.remove("@type").map(|ty| ty.into_string().unwrap()) {
 			if Some(ty.as_str()) == type_mapping {
