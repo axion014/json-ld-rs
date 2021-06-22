@@ -334,6 +334,7 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 							}
 						}).unwrap_or(Cow::Borrowed("@none"))
 				} else {
+					compacted_item.as_object_mut().and_then(|compacted_item| compacted_item.remove(&container_key));
 					Cow::Borrowed(expanded_item.get_attr("@index").map_or("@none", |index| index.as_string().unwrap()))
 				},
 				IdContainer!() => compacted_item.as_object_mut()
