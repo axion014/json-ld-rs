@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 #[async_recursion(?Send)]
 async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>) -> Result<Option<TestRecord>, Box<dyn Error>> {
-	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri.clone()) } else { None })
+	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri) } else { None })
 		.map(|base| Url::parse(&base)).transpose()?;
 	let value = stable::expand(value, &stable::JsonLdOptions::<_>::default()).await?;
 	for item in value {

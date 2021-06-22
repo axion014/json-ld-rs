@@ -362,8 +362,8 @@ async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: Json
 	if let Some(ref expand_context) = options.inner.expand_context {
 		let context = match expand_context {
 			JsonOrReference::JsonObject(json) => json.get("@context")
-				.map_or(Ok(vec![Some(JsonOrReference::JsonObject(json.clone()))]), |json| map_context(Cow::Borrowed(json))),
-			JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri.clone()))])
+				.map_or(Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&**json)))]), |json| map_context(Cow::Borrowed(json))),
+			JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(&**iri)))])
 		}?;
 		active_context = process_context(&active_context, &context, active_context.original_base_url.as_ref(),
 			&options, &FrozenSet::new(), false, true, true).await?;
@@ -375,7 +375,7 @@ async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: Json
 					Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
 					&options, &FrozenSet::new(), false, true, true).await?;
 			}
-			(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url.clone()))
+			(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url))
 		},
 		JsonLdInput::JsonObject(json) => (json.into(), options.inner.base.clone()),
 		JsonLdInput::Reference(_) => unreachable!()

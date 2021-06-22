@@ -293,10 +293,10 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 		}
 	}
 	for (_, nested_values) in nests {
-		match nested_values.as_enum() {
-			Borrowed::Array(array) => {
-				for nested_value in array.iter() {
-					if let Some(nested_value) = nested_value.as_object() {
+		match nested_values.into_enum() {
+			Owned::Array(array) => {
+				for nested_value in array.into_iter() {
+					if let Some(nested_value) = nested_value.into_object() {
 						expand_nested_value(result, nested_value, active_context, type_scoped_context,
 							active_property, base_url, input_type, options).await?;
 					} else {
@@ -304,7 +304,7 @@ async fn expand_object<'a, T, F>(result: &mut T::Object,
 					}
 				}
 			},
-			Borrowed::Object(nested_value) => expand_nested_value(result, nested_value,
+			Owned::Object(nested_value) => expand_nested_value(result, nested_value,
 				active_context, type_scoped_context, active_property, base_url, input_type, options).await?,
 			_ => return Err(err!(InvalidNestValue))
 		}
@@ -434,7 +434,7 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(map_context: &Conte
 	Ok(index_value)
 }
 
-async fn expand_nested_value<T, F>(result: &mut T::Object, nested_value: &T::Object,
+async fn expand_nested_value<T, F>(result: &mut T::Object, nested_value: T::Object,
 		active_context: &Context<'_, T>, type_scoped_context: &Context<'_, T>, active_property: Option<&str>,
 		base_url: Option<&Url>, input_type: &Option<String>, options: &JsonLdOptionsImpl<'_, T, F>) -> Result<()> where
 	T: ForeignMutableJson + BuildableJson,
@@ -443,7 +443,7 @@ async fn expand_nested_value<T, F>(result: &mut T::Object, nested_value: &T::Obj
 	for (key, _) in nested_value.iter() {
 		if expand_iri!(active_context, key)?.as_deref() == Some("@value") { return Err(err!(InvalidNestValue)); }
 	}
-	expand_object(result, active_context, type_scoped_context, active_property, nested_value.clone(), base_url, input_type, options).await
+	expand_object(result, active_context, type_scoped_context, active_property, nested_value, base_url, input_type, options).await
 }
 
 async fn expand_keyword<T, F>(result: &mut T::Object, nests: &mut BTreeMap<String, T>,

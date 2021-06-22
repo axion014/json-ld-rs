@@ -74,7 +74,7 @@ pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, 
 				}
 			};
 			if obj.contains("@value") || (obj.contains("@id") && obj.len() == 1) {
-				return compact_value(&active_context, active_property, obj.clone(), options.inner);
+				return compact_value(&active_context, active_property, obj, options.inner);
 			}
 			if_chain! {
 				if let Some(list) = obj.remove("@list");
@@ -319,8 +319,8 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 					}
 				}),
 				IndexContainer!() => if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
-								.and_then(|definition| definition.index_mapping.as_ref().cloned()) {
-					let container_key = compact_iri(active_context, &index_key, options.inner, None, true, false)?;
+								.and_then(|definition| definition.index_mapping.as_ref()) {
+					let container_key = compact_iri(active_context, index_key, options.inner, None, true, false)?;
 					compacted_item.as_object_mut()
 						.and_then(|compacted_item| compacted_item.remove(&container_key).map(|index| (compacted_item, index)))
 						.and_then(|(compacted_item, index)| {
@@ -379,14 +379,14 @@ fn get_nest_result<'a, T>(active_context: &Context<T>, item_active_property: &st
 	T: ForeignMutableJson + BuildableJson
 {
 	if let Some(nest_term) = active_context.term_definitions.get(item_active_property)
-			.and_then(|definition| definition.nest_value.clone()) {
-		if nest_term != "@nest" && expand_iri!(active_context, &nest_term)?.as_deref() != Some("@nest") {
+			.and_then(|definition| definition.nest_value.as_ref()) {
+		if nest_term != "@nest" && expand_iri!(active_context, nest_term)?.as_deref() != Some("@nest") {
 			return Err(err!(InvalidNestValue));
 		}
-		if !result.contains(&nest_term) {
+		if !result.contains(nest_term) {
 			result.insert(nest_term.clone(), T::empty_object().into());
 		}
-		Ok(result.get_mut(&nest_term).unwrap().as_object_mut().unwrap())
+		Ok(result.get_mut(nest_term).unwrap().as_object_mut().unwrap())
 	} else {
 		Ok(result)
 	}
@@ -596,20 +596,20 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>>
 {
 	let term_definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
-	let language = term_definition.and_then(|definition| definition.language_mapping.clone())
-		.unwrap_or(active_context.default_language.clone());
-	let direction = term_definition.and_then(|definition| definition.direction_mapping.clone())
-		.or(active_context.default_base_direction.clone());
-	let type_mapping = term_definition.and_then(|definition| definition.type_mapping.clone());
+	let language = term_definition.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
+		.unwrap_or(active_context.default_language.as_deref());
+	let direction = term_definition.and_then(|definition| definition.direction_mapping.as_ref())
+		.or(active_context.default_base_direction.as_ref());
+	let type_mapping = term_definition.and_then(|definition| definition.type_mapping.as_deref());
 	let value = (|| {
 		if_chain! {
 			if value.len() == (if value.contains("@index") {2} else {1});
-			if let Some("@id") | Some("@vocab") = type_mapping.as_deref();
+			if let Some("@id") | Some("@vocab") = type_mapping;
 			if let Some(id) = value.remove("@id").map(|id| id.into_string().unwrap());
-			then { return Ok(compact_iri(active_context, &id, options, None, false, false)?.as_str().into()); }
+			then { return Ok(compact_iri(active_context, &id, options, None, false, false)?.into()); }
 		}
 		if let Some(ty) = value.remove("@type").map(|ty| ty.into_string().unwrap()) {
-			if Some(ty.as_str()) == type_mapping.as_deref() {
+			if Some(ty.as_str()) == type_mapping {
 				return Ok(value.remove("@value").unwrap_or(T::null()));
 			} else {
 				value.insert("@type".to_string(),

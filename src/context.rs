@@ -103,11 +103,11 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 				};
 				Some((Cow::Borrowed(&loaded_context.context), Some(&loaded_context.base_url)))
 			},
-			Some(JsonOrReference::JsonObject(json)) => Some((json.clone(), None)),
+			Some(JsonOrReference::JsonObject(json)) => Some((Cow::Borrowed(&**json), None)),
 			None => None
 		}))
 	}).collect::<stream::FuturesOrdered<_>>().filter_map(|context| future::ready(context.transpose()))
-			.try_fold(result, |mut result, context| async {
+			.try_fold(result, |mut result, context| async move {
 		if let Some((mut json, base)) = context {
 			let base_url = base.or(base_url);
 			if let Some(version) = json.get("@version") {
@@ -200,7 +200,7 @@ pub(crate) async fn process_context<'a, 'b, T, F>(
 				base_iri: active_context.original_base_url.clone(),
 				original_base_url: active_context.original_base_url.clone(),
 				previous_context: if !propagate {
-					Some(Box::new(result.clone()))
+					Some(Box::new(result))
 				} else {
 					None
 				},
@@ -485,11 +485,10 @@ pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_cont
 			},
 			Some(type_mapping) => insert("@type", type_mapping),
 			None => {
-				let mut lang_dir = make_lang_dir(value.language_mapping.as_ref().cloned()
+				let mut lang_dir = make_lang_dir(value.language_mapping.clone()
 					.map(|lang| lang.unwrap_or_else(|| "@null".to_string())), value.direction_mapping.as_ref());
 				if lang_dir == "" {
-					lang_dir = make_lang_dir(active_context.default_language.as_ref().cloned(),
-						active_context.default_base_direction.as_ref());
+					lang_dir = make_lang_dir(active_context.default_language.clone(), active_context.default_base_direction.as_ref());
 					insert("@language", "@none");
 					insert("@type", "@none");
 				}
