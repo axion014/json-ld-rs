@@ -27,15 +27,6 @@ use crate::util::{
 use crate::context::{process_context, create_term_definition};
 use crate::container::Container;
 
-// In absense of !(Never) type, a transmute is necessary
-fn empty_vec<T>() -> &'static Vec<T> {
-	static EMPTY_VEC: Vec<()> = vec![];
-	unsafe {
-		// SAFETY: The vector is always empty, and its value is uninhabited
-		std::mem::transmute(&EMPTY_VEC)
-	}
-}
-
 #[async_recursion(?Send)]
 pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, active_property: Option<&'a str>, element: T,
 		base_url: Option<&'a Url>, options: &JsonLdOptionsImpl<T, F>, from_map: bool) -> Result<Owned<T>>  where
@@ -44,7 +35,7 @@ pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, a
 {
 	let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
 	let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
-	let property_scoped_context: &crate::OptionalContexts<_> = definition.map_or(empty_vec(), |definition| &definition.context);
+	let property_scoped_context = definition.map_or(&[] as &[_], |definition| &definition.context);
 	match element.into_enum() {
 		Owned::Null => Ok(Owned::Null),
 		Owned::Array(array) => {
@@ -178,7 +169,7 @@ pub(crate) async fn expand_internal<'a, T, F>(active_context: &Context<'a, T>, a
 		value => {
 			if active_property.is_none() || active_property == Some("@graph") { return Ok(Owned::Null) }
 			Ok(Owned::Object(if !property_scoped_context.is_empty() {
-				expand_value(&process_context(active_context, &property_scoped_context,
+				expand_value(&process_context(active_context, property_scoped_context,
 					definition.unwrap().base_url.as_ref(), options, &FrozenSet::new(), false, true, true).await?,
 					definition, value)?
 			} else {

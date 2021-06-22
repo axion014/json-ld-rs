@@ -16,7 +16,7 @@ use hashmap_entry_ownable::std_hash::EntryAPI;
 use if_chain::if_chain;
 
 use crate::{
-	Context, OptionalContexts, JsonOrReference, LoadedContext, InverseContext,
+	Context, JsonOrReference, LoadedContext, InverseContext,
 	JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, Direction
 };
 use crate::util::{
@@ -53,7 +53,7 @@ fn process_direction<T: ForeignJson>(value: &T, nullify: bool) -> Result<Option<
 
 #[async_recursion(?Send)]
 pub(crate) async fn process_context<'a, 'b, T, F>(
-		active_context: &'b Context<'a, T>, local_context: &OptionalContexts<T>, base_url: Option<&'b Url>,
+		active_context: &'b Context<'a, T>, local_context: &[Option<JsonOrReference<'a, T>>], base_url: Option<&'b Url>,
 		options: &JsonLdOptionsImpl<'a, T, F>, remote_contexts: &FrozenSet<Box<Url>>, override_protected: bool,
 		mut propagate: bool, mut validate_scoped_context: bool) -> Result<Context<'a, T>> where
 	T: ForeignMutableJson + BuildableJson,
