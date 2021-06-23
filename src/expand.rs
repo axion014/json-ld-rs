@@ -707,7 +707,7 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(
 	}
 	let mut result = T::empty_object();
 	if let Some(type_mapping) = type_mapping {
-		if type_mapping != "@none" {
+		if type_mapping != "@id" && type_mapping != "@vocab" && type_mapping != "@none" {
 			result.insert("@type".to_string(), type_mapping.into());
 		}
 	} else if let Owned::String(_) = value {
