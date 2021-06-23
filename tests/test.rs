@@ -144,11 +144,14 @@ async fn evaluate_manifest_entry(entry: Value, base: &Option<Url>) -> Result<Opt
 	})
 }
 
-async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, _is_html: bool,
+async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_class: TestClass, is_html: bool,
 		base: &Option<Url>) -> Result<TestRecord, JsonLdTestError> {
 	let name = value.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
 			.map(|v| v.pointer("/0/@value").and_then(|name| name.as_str())
 			.ok_or(JsonLdTestError::InvalidManifest("invalid name"))).transpose()?.map(|name| name.to_string());
+	if is_html {
+		return Ok(TestRecord { name, content: Skip });
+	}
 	if !FILTER.is_match(value["@id"].as_str().unwrap()) && name.as_ref().map_or(true, |name| !FILTER.is_match(name)) {
 		return Ok(TestRecord { name, content: Skip });
 	}
