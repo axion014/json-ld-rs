@@ -1,3 +1,15 @@
+// Expansion Algorithms.
+//
+// Spec correspondence:
+// expand_internal - the entire algorithm
+// expand_object - (part of 12,)13~14
+// expand_language_map - 13.7
+// expand_language_value - 13.7.4.2.*
+// expand_index_map - 13.8
+// expand_index_value - 13.8.3.7.*
+// expand_nested_value - 14.1.*
+// expand_keyword - 13.4.*
+
 use std::collections::{HashMap, BTreeMap, BTreeSet};
 use std::borrow::Cow;
 

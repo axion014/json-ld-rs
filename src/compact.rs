@@ -1,3 +1,16 @@
+// Compaction Algorithms.
+//
+// Spec correspondence:
+// compact_internal - the entire algorithm
+// compact_map - 12.*
+// compact_item - 12.8.*
+// compact_node_or_set - 12.8.9~12.8.10
+// get_nest_result - 12.7.2~12.7.3,12.8.2~12.8.3
+//
+// There are some large number of unwraps used.
+// It is assumed that the input is passed through the expansion algorithm beforehand,
+// which validates the input.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::borrow::Cow;
 
