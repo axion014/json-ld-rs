@@ -13,7 +13,7 @@ use async_recursion::async_recursion;
 
 use if_chain::if_chain;
 
-use crate::{Context, RemoteDocument, JsonLdOptionsImpl, JsonLdOptions, JsonLdProcessingMode, TermDefinition};
+use crate::{Context, RemoteDocument, JsonLdOptionsImpl, JsonLdOptions, JsonLdProcessingMode, TermDefinition, Direction};
 use crate::remote::LoadDocumentOptions;
 use crate::error::{Result, JsonLdErrorCode::{IRIConfusedWithPrefix, InvalidNestValue}};
 use crate::context::{process_context, create_inverse_context, select_term};
@@ -597,10 +597,6 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>>
 {
 	let term_definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
-	let language = term_definition.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
-		.unwrap_or(active_context.default_language.as_deref());
-	let direction = term_definition.and_then(|definition| definition.direction_mapping.as_ref())
-		.or(active_context.default_base_direction.as_ref());
 	let type_mapping = term_definition.and_then(|definition| definition.type_mapping.as_deref());
 	let value = (|| {
 		if value.len() == (if value.contains("@index") {2} else {1}) {
@@ -618,24 +614,23 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 		}
 		if let Some(ty) = value.remove("@type").map(|ty| ty.into_string().unwrap()) {
 			if Some(ty.as_str()) == type_mapping {
-				return Ok(value.remove("@value").unwrap_or(T::null()));
+				return Ok(value.remove("@value").unwrap());
 			} else {
 				value.insert("@type".to_string(),
 					compact_iri(active_context, &ty, options, None, true, false)?.into());
 			}
 		} else if type_mapping.as_deref() == Some("@none") {
 			value.insert("@type".to_string(), T::null());
-		} else if value.get("@value").and_then(|value| value.as_string()).is_none() {
-			if !value.contains("@index") || term_definition
-					.map_or(false, |definition| definition.container_mapping.is_index()) {
-				return Ok(value.remove("@value").unwrap_or(T::null()));
-			}
-		} else if value.get("@language").and_then(|lang| lang.as_string()) == language.as_deref() &&
-				value.get("@direction").and_then(|direction| direction.as_string())
-					.map_or(direction.is_none(), |s| direction.map_or(false, |d| s == d.as_ref())) {
-			if !value.contains("@index") || term_definition
-					.map_or(false, |definition| definition.container_mapping.is_index()) {
-				return Ok(value.remove("@value").unwrap_or(T::null()));
+		} else if !value.contains("@index") || term_definition.map_or(false, |definition| definition.container_mapping.is_index()) {
+			let language = term_definition.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
+				.unwrap_or(active_context.default_language.as_deref());
+			let direction = term_definition.and_then(|definition| definition.direction_mapping.as_ref())
+				.unwrap_or(active_context.default_base_direction.as_ref().unwrap_or(&Direction::None));
+			if value.get("@value").unwrap().as_string().is_none() ||
+				(value.get("@language").map(|lang| lang.as_string().unwrap()) == language.as_deref() &&
+				value.get("@direction").map(|lang| lang.as_string().unwrap()).unwrap_or("@none") == direction.as_ref())
+			{
+				return Ok(value.remove("@value").unwrap());
 			}
 		}
 		Ok(value.into())
