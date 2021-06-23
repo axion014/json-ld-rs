@@ -267,7 +267,7 @@ async fn compact_item<T, F>(active_context: &Context<'_, T>, item_active_propert
 					let compacted_item = if_chain! {
 						if let Some(array) = compacted_item.as_array();
 						if array.len() > 1;
-						then { json!(T, {"@include": compacted_item}) } else { compacted_item }
+						then { json!(T, {"@included": compacted_item}) } else { compacted_item }
 					};
 					add_value(nest_result, &item_active_property, compacted_item, as_array);
 				}
