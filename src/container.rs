@@ -1,6 +1,6 @@
 use crate::error::{JsonLdError, JsonLdErrorCode::*};
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub enum Container {
 	List,
 	Unordered(UnorderedContainer)
@@ -34,13 +34,13 @@ impl Container {
 	}
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub struct UnorderedContainer {
 	pub is_set: bool,
 	pub kind: ContainerKind
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub enum ContainerKind {
 	GraphContainer(GraphContainer),
 	Language,
@@ -58,13 +58,13 @@ impl ContainerKind {
 	}
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub struct GraphContainer {
 	pub is_graph: bool,
 	pub kind: Option<GraphContainerKind>
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub enum GraphContainerKind {
 	Id,
 	Index

@@ -34,13 +34,13 @@ use crate::error::{Result, JsonLdErrorCode::*};
 use crate::container::Container;
 use crate::util::map_context;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
 	JsonObject(Cow<'a, T::Object>),
 	Reference(Cow<'a, str>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Document<T: ForeignMutableJson + BuildableJson> {
 	ParsedJson(T),
 	RawJson(String)
@@ -55,7 +55,7 @@ impl <T: ForeignMutableJson + BuildableJson> Document<T> {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 	pub content_type: String,
 	pub context_url: Option<String>,
@@ -64,7 +64,7 @@ pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 	pub profile: Option<String>
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 	JsonObject(T::Object),
 	Reference(String),
@@ -74,7 +74,7 @@ pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 type JsonLdContext<'a, T> = Vec<JsonOrReference<'a, T>>;
 type OptionalContexts<'a, T> = Vec<Option<JsonOrReference<'a, T>>>;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Direction {
 	LTR,
 	RTL,
@@ -91,7 +91,7 @@ impl AsRef<str> for Direction {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TermDefinition<'a, T> where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
@@ -110,7 +110,7 @@ struct TermDefinition<'a, T> where
 	type_mapping: Option<String>
 }
 
-#[derive(Clone, PartialEq, Eq, Ord)]
+#[derive(Clone, PartialEq, Eq, Ord, Debug)]
 struct TermDefinitionKey(String);
 
 impl PartialOrd for TermDefinitionKey {
@@ -134,7 +134,7 @@ impl Borrow<str> for TermDefinitionKey {
 
 type InverseContext = HashMap<String, HashMap<Container, HashMap<String, HashMap<String, String>>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Context<'a, T> where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
@@ -167,13 +167,13 @@ impl <T> Default for Context<'_, T> where
 	}
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum JsonLdProcessingMode {
 	JsonLd1_1,
 	JsonLd1_0
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JsonLdOptions<'a, T, F = for<'b> fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>> where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
@@ -218,6 +218,7 @@ impl <'a, T, F> Default for JsonLdOptions<'a, T, F> where
 	}
 }
 
+#[derive(Debug)]
 struct LoadedContext<T: ForeignMutableJson + BuildableJson> {
 	context: T::Object,
 	base_url: Url
