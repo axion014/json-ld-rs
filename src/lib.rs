@@ -289,11 +289,13 @@ pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext
 
 	let mut active_context = process_context(&Context::default(), &context, context_base.as_ref(),
 		&options, &FrozenSet::new(), false, true, true).await?;
-	active_context.base_iri = if options.inner.compact_to_relative {
-		context_base
-	} else {
-		options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
-	};
+	if active_context.base_iri.is_none() {
+		active_context.base_iri = if options.inner.compact_to_relative {
+			context_base
+		} else {
+			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
+		};
+	}
 	let compacted_output = compact_internal(&mut active_context, None, expanded_input.into(), &options).await?;
 	let mut compacted_output = match compacted_output.into_enum() {
 		Owned::Object(object) => object,
