@@ -271,7 +271,7 @@ pub fn create_term_definition<'a, T, F>(
 				}
 				if let Some(ref iri) = definition.iri {
 					if !(term.contains(":") || term.contains("/")) && simple_term &&
-							iri.starts_with("_") || iri.ends_with(&[':', '/', '?', '#', '[', ']', '@'] as &[_]) {
+							(iri.starts_with("_") || iri.ends_with(&[':', '/', '?', '#', '[', ']', '@'] as &[_])) {
 						definition.prefix = true;
 					}
 				}
