@@ -257,11 +257,14 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 fn evaluate_option(options: Option<&'_ Value>) -> Result<JsonLdOptions<'_, Value>, JsonLdTestError> {
 	Ok(JsonLdOptions {
 		base: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#base")
-			.and_then(|v| v.pointer("/0/@value")).map(|base| base.as_str().map(|base| base.to_string())
+			.and_then(|v| v.pointer("/0/@id")).map(|base| base.as_str().map(|base| base.to_string())
 			.ok_or(JsonLdTestError::InvalidManifest("invalid base iri")))).transpose()?,
+		compact_arrays: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#compactArrays"))
+			.map(|v| v.pointer("/0/@value").and_then(|base| base.as_bool())
+			.ok_or(JsonLdTestError::InvalidManifest("invalid compact arrays flag"))).transpose()?.unwrap_or(true),
 		document_loader: Some(|url, options| limited_concurrency_loader(url, options)),
 		expand_context: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#expandContext")
-			.and_then(|v| v.pointer("/0/@value"))
+			.and_then(|v| v.pointer("/0/@id"))
 			.map(|context| context.as_str().map(|context| JsonOrReference::Reference(Cow::Borrowed(context)))
 			.ok_or(JsonLdTestError::InvalidManifest("invalid expand context")))).transpose()?,
 		processing_mode: options.and_then(|options| options.get("https://w3c.github.io/json-ld-api/tests/vocab#processingMode")
