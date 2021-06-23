@@ -633,9 +633,8 @@ fn compact_value<T, F>(active_context: &Context<T>, active_property: Option<&str
 				value.insert("@type".to_string(),
 					compact_iri(active_context, &ty, options, None, true, false)?.into());
 			}
-		} else if type_mapping.as_deref() == Some("@none") {
-			value.insert("@type".to_string(), T::null());
-		} else if !value.contains("@index") || term_definition.map_or(false, |definition| definition.container_mapping.is_index()) {
+		} else if type_mapping.as_deref() != Some("@none") &&
+				(!value.contains("@index") || term_definition.map_or(false, |definition| definition.container_mapping.is_index())) {
 			let language = term_definition.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
 				.unwrap_or(active_context.default_language.as_deref());
 			let direction = term_definition.and_then(|definition| definition.direction_mapping.as_ref())
