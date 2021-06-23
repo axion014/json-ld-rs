@@ -320,17 +320,17 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 				nest_result.get_mut(&item_active_property).unwrap().as_object_mut().unwrap()
 			};
 			let container_key = compact_iri(active_context, container.get_kind_str().unwrap(), options.inner, None, true, false)?;
-			let map_key = match container {
-				LanguageContainer!() => Cow::Borrowed(if_chain! {
+			let map_key = Ok(match container {
+				LanguageContainer!() => if_chain! {
 					if let Some(expanded_item) = expanded_item.as_object_mut();
 					if let Some(value) = expanded_item.remove("@value");
 					then {
 						compacted_item = value;
-						expanded_item.get("@language").map_or("@none", |lang| lang.as_string().unwrap())
+						expanded_item.remove("@language").map(|lang| lang.into_string().unwrap())
 					} else {
-						"@none"
+						None
 					}
-				}),
+				},
 				IndexContainer!() => if let Some(index_key) = active_context.term_definitions.get(item_active_property.as_str())
 								.and_then(|definition| definition.index_mapping.as_ref()) {
 					let container_key = compact_iri(active_context, index_key, options.inner, None, true, false)?;
@@ -339,33 +339,34 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 						.and_then(|(compacted_item, index)| {
 							if index.as_array().is_some() {
 								let mut index = index.into_array().unwrap().into_iter();
-								let ret = index.next().map(|map_key| Cow::Owned(map_key.into_string().unwrap()));
+								let ret = index.next().map(|map_key| map_key.into_string().unwrap());
 								for value in index { add_value(compacted_item, &container_key, value, false); }
 								ret
 							} else {
-								index.into_string().map(Cow::from)
+								index.into_string()
 							}
-						}).unwrap_or(Cow::Borrowed("@none"))
+						})
 				} else {
 					compacted_item.as_object_mut().and_then(|compacted_item| compacted_item.remove(&container_key));
-					Cow::Borrowed(expanded_item.get_attr("@index").map_or("@none", |index| index.as_string().unwrap()))
+					expanded_item.as_object_mut().and_then(|expanded_item| expanded_item.remove("@index"))
+						.map(|index| index.into_string().unwrap())
 				},
 				IdContainer!() => compacted_item.as_object_mut()
 					.and_then(|compacted_item| compacted_item.remove(&container_key))
-					.map_or(Cow::Borrowed("@none"), |map_key| Cow::Owned(map_key.into_string().unwrap())),
+					.map(|map_key| map_key.into_string().unwrap()),
 				TypeContainer!() => {
 					let map_key = compacted_item.as_object_mut()
 						.and_then(|compacted_item| compacted_item.remove(&container_key).map(|ty| (compacted_item, ty)))
 						.and_then(|(compacted_item, ty)| {
 							if ty.as_array().is_some() {
 								let mut ty = ty.into_array().unwrap().into_iter();
-								let ret = ty.next().map(|map_key| Cow::Owned(map_key.into_string().unwrap()));
+								let ret = ty.next().map(|map_key| map_key.into_string().unwrap());
 								for value in ty { add_value(compacted_item, &container_key, value, false); }
 								ret
 							} else {
-								ty.into_string().map(Cow::from)
+								ty.into_string()
 							}
-						}).unwrap_or(Cow::Borrowed("@none"));
+						});
 					if compacted_item.as_object()
 							.map_or(Ok(false), |compacted_item| Ok(compacted_item.len() == 1 &&
 								expand_iri!(active_context, compacted_item.iter().next().unwrap().0)?.as_deref() == Some("@id")))? {
@@ -379,7 +380,7 @@ async fn compact_node_or_set<T, F>(active_context: &Context<'_, T>, item_active_
 					map_key
 				},
 				_ => { unreachable!() }
-			};
+			}).transpose().unwrap_or_else(|| compact_iri(active_context, "@none", options.inner, None, true, false))?;
 			add_value(map_object, &map_key, compacted_item, as_array);
 		} else {
 			add_value(nest_result, &item_active_property, compacted_item, as_array);
