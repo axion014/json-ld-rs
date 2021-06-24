@@ -2,10 +2,10 @@
 mod defaultdocumentloader;
 
 use futures::future::BoxFuture;
-use json_trait::{ForeignMutableJson, BuildableJson};
+use json_trait::{BuildableJson, ForeignMutableJson};
 
-use crate::{JsonLdOptions, RemoteDocument};
 use crate::error::JsonLdError;
+use crate::{JsonLdOptions, RemoteDocument};
 
 pub use defaultdocumentloader::default_document_loader;
 
@@ -15,9 +15,8 @@ pub struct LoadDocumentOptions {
 	pub request_profile: Vec<String>
 }
 
-pub async fn load_remote<T, F>(iri: &str, options: &JsonLdOptions<'_, T, F>,
-	profile: Option<String>, request_profile: Vec<String>) ->
-		Result<RemoteDocument<T>, JsonLdError> where
+pub async fn load_remote<T, F>(iri: &str, options: &JsonLdOptions<'_, T, F>, profile: Option<String>, request_profile: Vec<String>) -> Result<RemoteDocument<T>, JsonLdError>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>, JsonLdError>>
 {

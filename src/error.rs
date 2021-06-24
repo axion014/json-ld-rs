@@ -1,5 +1,6 @@
 use std::error::Error;
-use std::{fmt, fmt::Display};
+use std::fmt;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub struct JsonLdError {

@@ -1,4 +1,5 @@
-use crate::error::{JsonLdError, JsonLdErrorCode::*};
+use crate::error::JsonLdError;
+use crate::error::JsonLdErrorCode::*;
 
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub enum Container {
@@ -9,8 +10,10 @@ pub enum Container {
 impl Container {
 	pub fn is_graph(&self) -> bool {
 		if let Container::Unordered(UnorderedContainer {
-			kind: ContainerKind::GraphContainer(GraphContainer { is_graph, .. }), ..
-		}) = self {
+			kind: ContainerKind::GraphContainer(GraphContainer { is_graph, .. }),
+			..
+		}) = self
+		{
 			*is_graph
 		} else {
 			false
@@ -18,19 +21,35 @@ impl Container {
 	}
 
 	pub fn is_id(&self) -> bool {
-		if let IdContainer!() = self { true } else { false }
+		if let IdContainer!() = self {
+			true
+		} else {
+			false
+		}
 	}
 
 	pub fn is_index(&self) -> bool {
-		if let IndexContainer!() = self { true } else { false }
+		if let IndexContainer!() = self {
+			true
+		} else {
+			false
+		}
 	}
 
 	pub fn is_set(&self) -> bool {
-		if let Container::Unordered(UnorderedContainer { is_set: true, .. }) = self { true } else { false }
+		if let Container::Unordered(UnorderedContainer { is_set: true, .. }) = self {
+			true
+		} else {
+			false
+		}
 	}
 
 	pub fn get_kind_str(&self) -> Option<&str> {
-		if let Container::Unordered(UnorderedContainer { kind, .. }) = self { kind.get_kind_str() } else { None }
+		if let Container::Unordered(UnorderedContainer { kind, .. }) = self {
+			kind.get_kind_str()
+		} else {
+			None
+		}
 	}
 }
 
@@ -94,21 +113,23 @@ pub fn parse_container<'a>(containers: impl IntoIterator<Item = &'a str>) -> Res
 		}
 	}
 	match container_type {
-		Some("@list") if is_set || is_graph => {
-			Err(err!(InvalidContainerMapping, "@list container can't be composed with other container types"))
-		},
+		Some("@list") if is_set || is_graph => Err(err!(InvalidContainerMapping, "@list container can't be composed with other container types")),
 		Some("@list") => Ok(Container::List),
 		None if !(is_set || is_graph) => Err(err!(InvalidContainerMapping, "@container cannot be an empty array")),
 		_ => Ok(Container::Unordered(UnorderedContainer {
-			is_set, kind: match container_type {
+			is_set,
+			kind: match container_type {
 				Some("@language" | "@type") if is_graph => {
-					return Err(err!(InvalidContainerMapping,
-						"@graph container can't be composed with container types other than @id, @index, and @set"));
-				},
+					return Err(err!(
+						InvalidContainerMapping,
+						"@graph container can't be composed with container types other than @id, @index, and @set"
+					));
+				}
 				Some("@language") => ContainerKind::Language,
 				Some("@type") => ContainerKind::Type,
 				_ => ContainerKind::GraphContainer(GraphContainer {
-					is_graph, kind: match container_type {
+					is_graph,
+					kind: match container_type {
 						Some("@id") => Some(GraphContainerKind::Id),
 						Some("@index") => Some(GraphContainerKind::Index),
 						None => None,

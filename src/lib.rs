@@ -1,15 +1,16 @@
 #![feature(try_find)]
 
-use std::collections::{HashMap, BTreeMap};
 use std::borrow::{Borrow, Cow};
+use std::collections::{BTreeMap, HashMap};
 
 use futures::future::BoxFuture;
 
 use elsa::{FrozenMap, FrozenSet};
 use once_cell::unsync::OnceCell;
 
-use json_trait::{ForeignJson, ForeignMutableJson, BuildableJson, typed_json::*, json};
-use cc_traits::{Get, Len, PushBack, MapInsert, Remove};
+use cc_traits::{Get, Len, MapInsert, PushBack, Remove};
+use json_trait::typed_json::*;
+use json_trait::{json, BuildableJson, ForeignJson, ForeignMutableJson};
 
 use maybe_owned::MaybeOwned;
 
@@ -18,26 +19,27 @@ use url::Url;
 #[macro_use]
 mod macros;
 
-pub mod error;
-pub mod remote;
-mod context;
 mod compact;
-mod expand;
 mod container;
+mod context;
+pub mod error;
+mod expand;
+pub mod remote;
 mod util;
 
-use crate::context::process_context;
 use crate::compact::{compact_internal, compact_iri};
+use crate::container::Container;
+use crate::context::process_context;
+use crate::error::JsonLdErrorCode::*;
+use crate::error::Result;
 use crate::expand::expand_internal;
 use crate::remote::LoadDocumentOptions;
-use crate::error::{Result, JsonLdErrorCode::*};
-use crate::container::Container;
 use crate::util::map_context;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
 	JsonObject(Cow<'a, T::Object>),
-	Reference(Cow<'a, str>),
+	Reference(Cow<'a, str>)
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +48,7 @@ pub enum Document<T: ForeignMutableJson + BuildableJson> {
 	RawJson(String)
 }
 
-impl <T: ForeignMutableJson + BuildableJson> Document<T> {
+impl<T: ForeignMutableJson + BuildableJson> Document<T> {
 	pub fn to_parsed(self) -> std::result::Result<T, T::Err> {
 		match self {
 			Document::ParsedJson(v) => Ok(v),
@@ -68,7 +70,7 @@ pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
 	JsonObject(T::Object),
 	Reference(String),
-	RemoteDocument(RemoteDocument<T>),
+	RemoteDocument(RemoteDocument<T>)
 }
 
 type JsonLdContext<'a, T> = Vec<JsonOrReference<'a, T>>;
@@ -92,7 +94,8 @@ impl AsRef<str> for Direction {
 }
 
 #[derive(Clone, Debug)]
-struct TermDefinition<'a, T> where
+struct TermDefinition<'a, T>
+where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
@@ -135,7 +138,8 @@ impl Borrow<str> for TermDefinitionKey {
 type InverseContext = HashMap<String, HashMap<Container, HashMap<String, HashMap<String, String>>>>;
 
 #[derive(Clone, Debug)]
-pub struct Context<'a, T> where
+pub struct Context<'a, T>
+where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
@@ -149,7 +153,8 @@ pub struct Context<'a, T> where
 	previous_context: Option<Box<Context<'a, T>>>
 }
 
-impl <T> Default for Context<'_, T> where
+impl<T> Default for Context<'_, T>
+where
 	T: ForeignMutableJson + BuildableJson,
 	T::Object: Clone
 {
@@ -174,7 +179,8 @@ pub enum JsonLdProcessingMode {
 }
 
 #[derive(Clone, Debug)]
-pub struct JsonLdOptions<'a, T, F = for<'b> fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>> where
+pub struct JsonLdOptions<'a, T, F = for<'b> fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
 {
@@ -195,7 +201,8 @@ pub struct JsonLdOptions<'a, T, F = for<'b> fn(&'b str, &'b Option<LoadDocumentO
 	pub use_rdf_type: bool
 }
 
-impl <'a, T, F> Default for JsonLdOptions<'a, T, F> where
+impl<'a, T, F> Default for JsonLdOptions<'a, T, F>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
 {
@@ -224,7 +231,8 @@ struct LoadedContext<T: ForeignMutableJson + BuildableJson> {
 	base_url: Url
 }
 
-struct JsonLdOptionsImpl<'a, T, F> where
+struct JsonLdOptionsImpl<'a, T, F>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
 {
@@ -232,7 +240,8 @@ struct JsonLdOptionsImpl<'a, T, F> where
 	loaded_contexts: MaybeOwned<'a, FrozenMap<Url, Box<LoadedContext<T>>>>
 }
 
-impl <'a, T, F> From<&'a JsonLdOptions<'a, T, F>> for JsonLdOptionsImpl<'a, T, F> where
+impl<'a, T, F> From<&'a JsonLdOptions<'a, T, F>> for JsonLdOptionsImpl<'a, T, F>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>>
 {
@@ -244,8 +253,8 @@ impl <'a, T, F> From<&'a JsonLdOptions<'a, T, F>> for JsonLdOptionsImpl<'a, T, F
 	}
 }
 
-pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>,
-		options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object> where
+pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>, options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
@@ -269,7 +278,12 @@ pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext
 	let context_base = if let JsonLdInput::RemoteDocument(ref doc) = *input {
 		Some(Url::parse(&doc.document_url).map_err(|e| err!(InvalidBaseIRI, , e))?)
 	} else {
-		options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
+		options
+			.inner
+			.base
+			.as_ref()
+			.map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e)))
+			.transpose()?
 	};
 
 	// If context is a map having an @context entry, set context to that entry's value
@@ -279,7 +293,8 @@ pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext
 				JsonOrReference::JsonObject(mut json) => match json {
 					Cow::Owned(ref mut json) => json.remove("@context").map(|json| map_context(Cow::Owned(json))),
 					Cow::Borrowed(json) => json.get("@context").map(|json| map_context(Cow::Borrowed(json)))
-				}.unwrap_or(Ok(vec![Some(JsonOrReference::JsonObject(json))])),
+				}
+				.unwrap_or(Ok(vec![Some(JsonOrReference::JsonObject(json))])),
 				JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri))])
 			}
 		} else {
@@ -287,13 +302,17 @@ pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext
 		}
 	})?;
 
-	let mut active_context = process_context(&Context::default(), &context, context_base.as_ref(),
-		&options, &FrozenSet::new(), false, true, true).await?;
+	let mut active_context = process_context(&Context::default(), &context, context_base.as_ref(), &options, &FrozenSet::new(), false, true, true).await?;
 	if active_context.base_iri.is_none() {
 		active_context.base_iri = if options.inner.compact_to_relative {
 			context_base
 		} else {
-			options.inner.base.as_ref().map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?
+			options
+				.inner
+				.base
+				.as_ref()
+				.map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e)))
+				.transpose()?
 		};
 	}
 	let compacted_output = compact_internal(&mut active_context, None, expanded_input.into(), &options).await?;
@@ -303,44 +322,45 @@ pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext
 			if array.is_empty() {
 				T::empty_object()
 			} else {
-				json!(T, {compact_iri(&active_context, "@graph", &options.inner, None, true, false)?: array})
+				json!(T, { compact_iri(&active_context, "@graph", &options.inner, None, true, false)?: array })
 			}
-		},
+		}
 		_ => panic!()
 	};
-	if context.iter().any(|ctx| ctx.as_ref().map_or(false, |ctx| match ctx {
-		JsonOrReference::JsonObject(json) => !json.is_empty(),
-		JsonOrReference::Reference(_) => true
-	})) {
-		let mut context = context.into_iter().map(|ctx| {
-			if let Some(ctx) = ctx {
-				match ctx {
-					JsonOrReference::JsonObject(json) => json.into_owned().into(),
-					JsonOrReference::Reference(iri) => iri.into_owned().into()
+	if context.iter().any(|ctx| {
+		ctx.as_ref().map_or(false, |ctx| match ctx {
+			JsonOrReference::JsonObject(json) => !json.is_empty(),
+			JsonOrReference::Reference(_) => true
+		})
+	}) {
+		let mut context = context
+			.into_iter()
+			.map(|ctx| {
+				if let Some(ctx) = ctx {
+					match ctx {
+						JsonOrReference::JsonObject(json) => json.into_owned().into(),
+						JsonOrReference::Reference(iri) => iri.into_owned().into()
+					}
+				} else {
+					T::null()
 				}
-			} else {
-				T::null()
-			}
-		}).collect::<T::Array>();
-		compacted_output.insert("@context".to_string(), if context.len() == 1 {
-			context.remove(0).unwrap().into()
-		} else {
-			context.into()
-		});
+			})
+			.collect::<T::Array>();
+		compacted_output.insert("@context".to_string(), if context.len() == 1 { context.remove(0).unwrap().into() } else { context.into() });
 	}
 	Ok(compacted_output)
 }
 
-pub async fn expand<T, F>(input: &JsonLdInput<T>, options: &JsonLdOptions<'_, T, F>) ->
-		Result<<T as ForeignJson>::Array> where
+pub async fn expand<T, F>(input: &JsonLdInput<T>, options: &JsonLdOptions<'_, T, F>) -> Result<<T as ForeignJson>::Array>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
 	expand_with_loaded_contexts(input, options.into()).await
 }
 
-async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'_, T, F>) ->
-		Result<<T as ForeignJson>::Array> where
+async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'_, T, F>) -> Result<<T as ForeignJson>::Array>
+where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
@@ -350,36 +370,64 @@ async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: Json
 		Cow::Borrowed(input)
 	};
 	let mut active_context = Context {
-		base_iri: options.inner.base.as_ref().or_else(|| if let JsonLdInput::RemoteDocument(ref document) = *input {
-			Some(&document.document_url)
-		} else {
-			None
-		}).map(|iri| Url::parse(iri).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?,
+		base_iri: options
+			.inner
+			.base
+			.as_ref()
+			.or_else(|| {
+				if let JsonLdInput::RemoteDocument(ref document) = *input {
+					Some(&document.document_url)
+				} else {
+					None
+				}
+			})
+			.map(|iri| Url::parse(iri).map_err(|e| err!(InvalidBaseIRI, , e)))
+			.transpose()?,
 		original_base_url: if let JsonLdInput::RemoteDocument(ref document) = *input {
 			Some(&document.document_url)
 		} else {
 			options.inner.base.as_ref()
-		}.map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?,
+		}
+		.map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e)))
+		.transpose()?,
 		..Context::default()
 	};
 	if let Some(ref expand_context) = options.inner.expand_context {
 		let context = match expand_context {
-			JsonOrReference::JsonObject(json) => json.get("@context")
+			JsonOrReference::JsonObject(json) => json
+				.get("@context")
 				.map_or(Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&**json)))]), |json| map_context(Cow::Borrowed(json))),
 			JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(&**iri)))])
 		}?;
-		active_context = process_context(&active_context, &context, active_context.original_base_url.as_ref(),
-			&options, &FrozenSet::new(), false, true, true).await?;
+		active_context = process_context(
+			&active_context,
+			&context,
+			active_context.original_base_url.as_ref(),
+			&options,
+			&FrozenSet::new(),
+			false,
+			true,
+			true
+		)
+		.await?;
 	}
 	let (input, document_url) = match input.into_owned() {
 		JsonLdInput::RemoteDocument(document) => {
 			if let Some(ref context_url) = document.context_url {
-				active_context = process_context(&active_context, &vec![Some(JsonOrReference::Reference(context_url.clone().into()))],
+				active_context = process_context(
+					&active_context,
+					&vec![Some(JsonOrReference::Reference(context_url.clone().into()))],
 					Some(&Url::parse(context_url).map_err(|e| err!(InvalidBaseIRI, , e))?),
-					&options, &FrozenSet::new(), false, true, true).await?;
+					&options,
+					&FrozenSet::new(),
+					false,
+					true,
+					true
+				)
+				.await?;
 			}
 			(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url))
-		},
+		}
 		JsonLdInput::JsonObject(json) => (json.into(), options.inner.base.clone()),
 		JsonLdInput::Reference(_) => unreachable!()
 	};
@@ -393,33 +441,30 @@ async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: Json
 				Owned::Null => T::empty_array(),
 				expanded_output => json!(T, [expanded_output.into_untyped()])
 			}
-		},
+		}
 		Owned::Array(array) => array,
 		Owned::Null => T::empty_array(),
 		expanded_output => json!(T, [expanded_output.into_untyped()])
 	})
 }
 
-/*
-
-pub async fn flatten<'a, T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLdContext<'_, T>>,
-		options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T> where
-	T: ForeignMutableJson + BuildableJson,
-	F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
-	R: Future<Output = Result<crate::RemoteDocument<T>>> + 'a
-{
-	todo!()
-}
-
-pub async fn frame() {
-	todo!()
-}
-
-pub async fn from_rdf(input: RdfDataset, options: JsonLdOptions) -> dyn ExactSizeIterator<Item = dyn JsonType> {
-	todo!()
-}
-
-pub async fn to_rdf(input: JsonLdInput, options: JsonLdOptions) -> RdfDataset {
-
-}
-*/
+// pub async fn flatten<'a, T, F, R>(input: &JsonLdInput<T>, context: Option<JsonLdContext<'_, T>>,
+// options: impl Into<JsonLdOptionsImpl<'a, T, F, R>>) -> Result<T> where
+// T: ForeignMutableJson + BuildableJson,
+// F: Fn(&str, &Option<LoadDocumentOptions>) -> R + 'a,
+// R: Future<Output = Result<crate::RemoteDocument<T>>> + 'a
+// {
+// todo!()
+// }
+//
+// pub async fn frame() {
+// todo!()
+// }
+//
+// pub async fn from_rdf(input: RdfDataset, options: JsonLdOptions) -> dyn ExactSizeIterator<Item = dyn JsonType> {
+// todo!()
+// }
+//
+// pub async fn to_rdf(input: JsonLdInput, options: JsonLdOptions) -> RdfDataset {
+//
+// }

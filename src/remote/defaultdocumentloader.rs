@@ -1,13 +1,15 @@
-use reqwest::{Client, Response, header, redirect::Policy, StatusCode};
-use http_link::{Link, parse_link_header};
 use async_recursion::async_recursion;
+use http_link::{parse_link_header, Link};
+use reqwest::redirect::Policy;
+use reqwest::{header, Client, Response, StatusCode};
 
-use json_trait::{ForeignMutableJson, BuildableJson};
+use json_trait::{BuildableJson, ForeignMutableJson};
 
-use crate::{RemoteDocument, Document};
-use crate::error::{JsonLdError, JsonLdErrorCode::*};
-use crate::util::OneError;
 use super::LoadDocumentOptions;
+use crate::error::JsonLdError;
+use crate::error::JsonLdErrorCode::*;
+use crate::util::OneError;
+use crate::{Document, RemoteDocument};
 
 lazy_static::lazy_static! {
 	static ref IRI_CLIENT: Client = Client::builder().redirect(Policy::custom(|attempt| {
@@ -29,8 +31,8 @@ fn process_link_headers<'a>(response: &'a Response, url: &'a url::Url) -> impl I
 }
 
 #[async_recursion]
-pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocumentOptions>) ->
-		Result<RemoteDocument<T>, JsonLdError> where
+pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocumentOptions>) -> Result<RemoteDocument<T>, JsonLdError>
+where
 	T: ForeignMutableJson + BuildableJson
 {
 	let mut accept = String::from("application/ld+json");
@@ -50,35 +52,49 @@ pub async fn default_document_loader<T>(url_str: &str, options: &Option<LoadDocu
 
 	let url = url::Url::parse(url_str).map_err(|e| err!(LoadingDocumentFailed, , e))?;
 
-	let intermediate_response = IRI_CLIENT.get(url.clone())
+	let intermediate_response = IRI_CLIENT
+		.get(url.clone())
 		.header(header::ACCEPT, accept.clone())
-		.send().await
+		.send()
+		.await
 		.map_err(|e| err!(LoadingDocumentFailed, , e))?;
 	let document_url = intermediate_response.url().to_string();
 	let response = if intermediate_response.status().is_redirection() {
-		REPRESENTATION_CLIENT.get(intermediate_response.url().clone())
+		REPRESENTATION_CLIENT
+			.get(intermediate_response.url().clone())
 			.header(header::ACCEPT, accept)
-			.send().await
+			.send()
+			.await
 			.map_err(|e| err!(LoadingDocumentFailed, , e))?
-	} else { intermediate_response };
+	} else {
+		intermediate_response
+	};
 
 	let mut context_url = None;
-	let content_type = response.headers().get(header::CONTENT_TYPE)
-		.map(|s| s.to_str().map_err(|e| err!(LoadingDocumentFailed, , e))?
-			.parse::<mime::Mime>().map_err(|e| err!(LoadingDocumentFailed, , e))
-		).ok_or(err!(LoadingDocumentFailed, "Content-Type header is missing"))??;
+	let content_type = response
+		.headers()
+		.get(header::CONTENT_TYPE)
+		.map(|s| {
+			s.to_str()
+				.map_err(|e| err!(LoadingDocumentFailed, , e))?
+				.parse::<mime::Mime>()
+				.map_err(|e| err!(LoadingDocumentFailed, , e))
+		})
+		.ok_or(err!(LoadingDocumentFailed, "Content-Type header is missing"))??;
 
 	match content_type.essence_str() {
-		"application/ld+json" => {},
+		"application/ld+json" => {}
 		t if t == "application/json" || t.ends_with("+json") => {
 			for link in process_link_headers(&response, &url) {
 				let link = link?;
 				if link.rel == "http://www.w3.org/ns/json-ld#context" {
-					if context_url.is_some() { return Err(err!(MultipleContextLinkHeaders)); }
+					if context_url.is_some() {
+						return Err(err!(MultipleContextLinkHeaders));
+					}
 					context_url = Some(link.target);
 				}
 			}
-		},
+		}
 		t => {
 			if !(t == "text/html" || t == "application/xhtml+xml") {
 				for link in process_link_headers(&response, &url) {
