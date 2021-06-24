@@ -3,6 +3,9 @@ name = "json-ld-rs"
 version = "0.1.0"
 authors = ["axion014 <axion014@gmail.com>"]
 edition = "2018"
+description = "Rusty JSON-LD processor"
+license = "MIT"
+repository = "https://github.com/axion014/json-ld-rs/"
 
 [features]
 default = ["reqwest-loader"]
