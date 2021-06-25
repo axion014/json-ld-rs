@@ -32,8 +32,8 @@ use crate::container::Container;
 use crate::context::{create_term_definition, process_context};
 use crate::error::JsonLdErrorCode::*;
 use crate::error::Result;
-use crate::util::{add_value, as_compact_iri, is_graph_object, is_iri, is_jsonld_keyword, looks_like_a_jsonld_keyword, map_context, resolve};
-use crate::{Context, Direction, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, LoadDocumentOptions, RemoteDocument, TermDefinition};
+use crate::util::{add_value, as_compact_iri, is_graph_object, is_iri, is_jsonld_keyword, looks_like_a_jsonld_keyword, resolve, ContextJson};
+use crate::{Context, Direction, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, LoadDocumentOptions, OptionalContexts, RemoteDocument, TermDefinition};
 
 #[async_recursion(?Send)]
 pub(crate) async fn expand_internal<'a, T, F>(
@@ -118,7 +118,19 @@ where
 			}
 			let mut obj = obj.into_iter().collect::<BTreeMap<_, _>>();
 			if let Some(context) = obj.remove("@context") {
-				active_context = Cow::Owned(process_context(&active_context, &map_context(Cow::Owned(context))?, base_url, options, &FrozenSet::new(), false, true, true).await?);
+				active_context = Cow::Owned(
+					process_context(
+						&active_context,
+						&OptionalContexts::from_json(Cow::Owned(context))?,
+						base_url,
+						options,
+						&FrozenSet::new(),
+						false,
+						true,
+						true
+					)
+					.await?
+				);
 			}
 			let type_scoped_context = active_context.clone();
 			let mut input_type = None;

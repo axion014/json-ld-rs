@@ -218,23 +218,7 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 				.document
 				.to_parsed()
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
-			let context = match context {
-				Value::Array(ctx) => ctx
-					.into_iter()
-					.map(|value| {
-						Ok(match value {
-							// Only one level of recursion, I think
-							Value::Object(obj) => JsonOrReference::JsonObject(Cow::Owned(obj)),
-							Value::String(reference) => JsonOrReference::Reference(Cow::Owned(reference)),
-							_ => return Err(JsonLdTestError::JsonLdError(JsonLdErrorCode::InvalidContextEntry))
-						})
-					})
-					.collect(),
-				Value::Object(ctx) => Ok(vec![JsonOrReference::JsonObject(Cow::Owned(ctx))]),
-				Value::String(reference) => Ok(vec![JsonOrReference::Reference(Cow::Owned(reference))]),
-				_ => Err(JsonLdTestError::JsonLdError(JsonLdErrorCode::InvalidContextEntry))
-			}?;
-			std::panic::AssertUnwindSafe(compact(&input, Some(context), &options))
+			std::panic::AssertUnwindSafe(compact(&input, Some(Cow::Owned(context)), &options))
 				.catch_unwind()
 				.await
 				.map(|output| output.map(|output| Value::Object(output)))

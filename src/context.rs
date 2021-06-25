@@ -22,8 +22,10 @@ use crate::error::JsonLdErrorCode::*;
 use crate::error::{JsonLdError, Result};
 use crate::expand::expand_iri;
 use crate::remote::{load_remote, LoadDocumentOptions};
-use crate::util::{as_compact_iri, is_iri, is_jsonld_keyword, looks_like_a_jsonld_keyword, make_lang_dir, map_context, resolve};
-use crate::{Context, Direction, InverseContext, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, JsonOrReference, LoadedContext, RemoteDocument, TermDefinition};
+use crate::util::{as_compact_iri, is_iri, is_jsonld_keyword, looks_like_a_jsonld_keyword, make_lang_dir, resolve, ContextJson};
+use crate::{
+	Context, Direction, InverseContext, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, JsonOrReference, LoadedContext, OptionalContexts, RemoteDocument, TermDefinition
+};
 
 const MAX_CONTEXTS: usize = 25; // The number's placeholder
 
@@ -484,7 +486,7 @@ where
 				if let JsonLdProcessingMode::JsonLd1_0 = options.processing_mode {
 					return Err(err!(InvalidTermDefinition));
 				}
-				let context = map_context(Cow::Owned(context.clone())).map_err(|e| err!(InvalidScopedContext, , e))?;
+				let context = OptionalContexts::from_json(Cow::Owned(context.clone())).map_err(|e| err!(InvalidScopedContext, , e))?;
 				definition.context = context;
 				definition.base_url = base_url.cloned();
 			}

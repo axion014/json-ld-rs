@@ -9,7 +9,7 @@ use url::{ParseError, Url};
 
 use crate::error::JsonLdError;
 use crate::error::JsonLdErrorCode::InvalidLocalContext;
-use crate::{JsonOrReference, OptionalContexts};
+use crate::{JsonLdContext, JsonOrReference, OptionalContexts};
 
 pub fn is_jsonld_keyword(value: &str) -> bool {
 	value.starts_with('@')
@@ -90,44 +90,87 @@ pub fn add_value<T: ForeignMutableJson + BuildableJson>(object: &mut T::Object, 
 	}
 }
 
-pub fn map_context<T: ForeignMutableJson + BuildableJson>(ctx: Cow<T>) -> Result<OptionalContexts<T>, JsonLdError> {
-	match ctx {
-		Cow::Owned(ctx) => match ctx.into_enum() {
-			Owned::Array(ctx) => ctx
-				.into_iter()
-				.map(|value| {
+pub trait ContextJson<'a, T: ForeignMutableJson + BuildableJson>: Sized {
+	type Item;
+
+	fn from_json(ctx: Cow<'a, T>) -> Result<Self, JsonLdError> {
+		match ctx {
+			Cow::Owned(ctx) => match ctx.into_enum() {
+				Owned::Array(ctx) => Self::array(ctx.into_iter().map(|value| {
 					Ok(match value.into_enum() {
 						// Only one level of recursion, I think
-						Owned::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Owned(obj))),
-						Owned::String(reference) => Some(JsonOrReference::Reference(Cow::Owned(reference))),
-						Owned::Null => None,
+						Owned::Object(ctx) => Self::item(JsonOrReference::JsonObject(Cow::Owned(ctx))),
+						Owned::String(reference) => Self::item(JsonOrReference::Reference(Cow::Owned(reference))),
+						Owned::Null => Self::null()?,
 						_ => return Err(err!(InvalidLocalContext))
 					})
-				})
-				.collect(),
-			Owned::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Owned(ctx)))]),
-			Owned::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Owned(reference)))]),
-			Owned::Null => Ok(vec![None]),
-			_ => Err(err!(InvalidLocalContext))
-		},
-		Cow::Borrowed(ctx) => match ctx.as_enum() {
-			Borrowed::Array(ctx) => ctx
-				.iter()
-				.map(|value| {
+				})),
+				Owned::Object(ctx) => Ok(Self::unit(Self::item(JsonOrReference::JsonObject(Cow::Owned(ctx))))),
+				Owned::String(reference) => Ok(Self::unit(Self::item(JsonOrReference::Reference(Cow::Owned(reference))))),
+				Owned::Null => Ok(Self::unit(Self::null()?)),
+				_ => Err(err!(InvalidLocalContext))
+			},
+			Cow::Borrowed(ctx) => match ctx.as_enum() {
+				Borrowed::Array(ctx) => Self::array(ctx.iter().map(|value| {
 					Ok(match value.as_enum() {
 						// Only one level of recursion, I think
-						Borrowed::Object(obj) => Some(JsonOrReference::JsonObject(Cow::Borrowed(obj))),
-						Borrowed::String(reference) => Some(JsonOrReference::Reference(Cow::Borrowed(reference))),
-						Borrowed::Null => None,
+						Borrowed::Object(ctx) => Self::item(JsonOrReference::JsonObject(Cow::Borrowed(ctx))),
+						Borrowed::String(reference) => Self::item(JsonOrReference::Reference(Cow::Borrowed(reference))),
+						Borrowed::Null => Self::null()?,
 						_ => return Err(err!(InvalidLocalContext))
 					})
-				})
-				.collect(),
-			Borrowed::Object(ctx) => Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(ctx)))]),
-			Borrowed::String(reference) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(reference)))]),
-			Borrowed::Null => Ok(vec![None]),
-			_ => Err(err!(InvalidLocalContext))
+				})),
+				Borrowed::Object(ctx) => Ok(Self::unit(Self::item(JsonOrReference::JsonObject(Cow::Borrowed(ctx))))),
+				Borrowed::String(reference) => Ok(Self::unit(Self::item(JsonOrReference::Reference(Cow::Borrowed(reference))))),
+				Borrowed::Null => Ok(Self::unit(Self::null()?)),
+				_ => Err(err!(InvalidLocalContext))
+			}
 		}
+	}
+
+	fn array(items: impl IntoIterator<Item = Result<Self::Item, JsonLdError>>) -> Result<Self, JsonLdError>;
+	fn unit(item: Self::Item) -> Self;
+	fn item(item: JsonOrReference<'a, T>) -> Self::Item;
+	fn null() -> Result<Self::Item, JsonLdError>;
+}
+
+impl<'a, T: ForeignMutableJson + BuildableJson> ContextJson<'a, T> for JsonLdContext<'a, T> {
+	type Item = JsonOrReference<'a, T>;
+
+	fn array(items: impl IntoIterator<Item = Result<Self::Item, JsonLdError>>) -> Result<Self, JsonLdError> {
+		items.into_iter().collect()
+	}
+
+	fn unit(item: Self::Item) -> Self {
+		vec![item]
+	}
+
+	fn item(item: JsonOrReference<'a, T>) -> Self::Item {
+		item
+	}
+
+	fn null() -> Result<Self::Item, JsonLdError> {
+		Err(err!(InvalidLocalContext))
+	}
+}
+
+impl<'a, T: ForeignMutableJson + BuildableJson> ContextJson<'a, T> for OptionalContexts<'a, T> {
+	type Item = Option<JsonOrReference<'a, T>>;
+
+	fn array(items: impl IntoIterator<Item = Result<Self::Item, JsonLdError>>) -> Result<Self, JsonLdError> {
+		items.into_iter().collect()
+	}
+
+	fn unit(item: Self::Item) -> Self {
+		vec![item]
+	}
+
+	fn item(item: JsonOrReference<'a, T>) -> Self::Item {
+		Some(item)
+	}
+
+	fn null() -> Result<Self::Item, JsonLdError> {
+		Ok(None)
 	}
 }
 

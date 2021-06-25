@@ -34,7 +34,7 @@ use crate::error::JsonLdErrorCode::*;
 use crate::error::Result;
 use crate::expand::expand_internal;
 use crate::remote::LoadDocumentOptions;
-use crate::util::map_context;
+use crate::util::ContextJson;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum JsonOrReference<'a, T: ForeignMutableJson + BuildableJson> {
@@ -253,7 +253,7 @@ where
 	}
 }
 
-pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<JsonLdContext<'a, T>>, options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object>
+pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<Cow<'a, T>>, options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object>
 where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
@@ -287,12 +287,13 @@ where
 	};
 
 	// If context is a map having an @context entry, set context to that entry's value
-	let context = ctx.map_or(Ok(vec![None]), |mut contexts| {
+	let context = ctx.map_or(Ok(vec![None]), |contexts| {
+		let mut contexts = JsonLdContext::from_json(contexts)?;
 		if contexts.len() == 1 {
 			match contexts.remove(0) {
 				JsonOrReference::JsonObject(mut json) => match json {
-					Cow::Owned(ref mut json) => json.remove("@context").map(|json| map_context(Cow::Owned(json))),
-					Cow::Borrowed(json) => json.get("@context").map(|json| map_context(Cow::Borrowed(json)))
+					Cow::Owned(ref mut json) => json.remove("@context").map(|json| OptionalContexts::from_json(Cow::Owned(json))),
+					Cow::Borrowed(json) => json.get("@context").map(|json| OptionalContexts::from_json(Cow::Borrowed(json)))
 				}
 				.unwrap_or(Ok(vec![Some(JsonOrReference::JsonObject(json))])),
 				JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(iri))])
@@ -394,9 +395,9 @@ where
 	};
 	if let Some(ref expand_context) = options.inner.expand_context {
 		let context = match expand_context {
-			JsonOrReference::JsonObject(json) => json
-				.get("@context")
-				.map_or(Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&**json)))]), |json| map_context(Cow::Borrowed(json))),
+			JsonOrReference::JsonObject(json) => json.get("@context").map_or(Ok(vec![Some(JsonOrReference::JsonObject(Cow::Borrowed(&**json)))]), |json| {
+				OptionalContexts::from_json(Cow::Borrowed(json))
+			}),
 			JsonOrReference::Reference(iri) => Ok(vec![Some(JsonOrReference::Reference(Cow::Borrowed(&**iri)))])
 		}?;
 		active_context = process_context(
