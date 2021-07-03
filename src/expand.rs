@@ -888,7 +888,7 @@ where
 		if_chain! {
 			if let IRIExpansionArguments::DefineTerms { ref mut active_context, local_context, ref mut defined, options } = args;
 			if let Some(prefix_definition) = local_context.get(prefix);
-			if defined.get(prefix).map_or(false, |v| !v);
+			if defined.get(prefix).map_or(true, |v| !v);
 			then {
 				create_term_definition(active_context, local_context, prefix, prefix_definition.as_enum(),
 					defined, options, None, false, false)?;
