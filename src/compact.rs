@@ -687,6 +687,15 @@ where
 	if !vocab {
 		if let Some(base_iri) = active_context.base_iri.as_ref() {
 			let var = resolve(&var, Some(&base_iri)).unwrap();
+			if *base_iri == var {
+				let mut base_iri = base_iri.clone();
+				{
+					let mut path = base_iri.path_segments_mut().unwrap();
+					path.pop();
+					path.push("");
+				}
+				return Ok(base_iri.make_relative(&var).unwrap());
+			}
 			return Ok(base_iri.make_relative(&var).unwrap_or(var.to_string()));
 		}
 	}
