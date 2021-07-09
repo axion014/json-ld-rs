@@ -51,15 +51,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	println!();
 	print!(
 		"{}",
-		evaluate_json_ld(&stable::JsonLdInput::Reference("https://w3c.github.io/json-ld-api/tests/manifest.jsonld".to_string()))
+		evaluate_json_ld(stable::JsonLdInput::Reference("https://w3c.github.io/json-ld-api/tests/manifest.jsonld"))
 			.await?
 			.unwrap()
 	);
 	Ok(())
 }
 
-#[async_recursion(?Send)]
-async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>) -> Result<Option<TestRecord>, Box<dyn Error>> {
+async fn evaluate_json_ld(value: stable::JsonLdInput<'_, Value>) -> Result<Option<TestRecord>, Box<dyn Error>> {
 	let base_iri = (if let stable::JsonLdInput::Reference(ref iri) = value { Some(iri) } else { None })
 		.map(|base| Url::parse(&base))
 		.transpose()?;
@@ -74,7 +73,6 @@ async fn evaluate_json_ld(value: &stable::JsonLdInput<Value>) -> Result<Option<T
 	Ok(None)
 }
 
-#[async_recursion(?Send)]
 async fn evaluate_object(mut value: Map<String, Value>, base: &Option<Url>) -> Result<Option<TestRecord>, Box<dyn Error>> {
 	// println!("Evaluating {:#?}", value);
 	if let Some(types) = value.remove("@type") {
@@ -107,7 +105,6 @@ async fn evaluate_typed_object(value: Map<String, Value>, types: &[Value], mut s
 	}
 }
 
-#[async_recursion(?Send)]
 async fn evaluate_manifest(mut value: Map<String, Value>, base: &Option<Url>) -> Result<TestRecord, Box<dyn Error>> {
 	let name = value
 		.get("http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#name")
@@ -147,7 +144,7 @@ async fn evaluate_manifest_entry(entry: Value, base: &Option<Url>) -> Result<Opt
 			.transpose()?
 		{
 			if base.as_ref().map_or(true, |base| base.as_str() != &url[..url::Position::AfterQuery]) {
-				if let Some(record) = evaluate_json_ld(&stable::JsonLdInput::Reference(url.to_string())).await? {
+				if let Some(record) = evaluate_json_ld(stable::JsonLdInput::Reference(url.as_str())).await? {
 					return Ok(Some(record));
 				} else {
 					return Ok(None);
@@ -196,13 +193,11 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 		.and_then(|v| v.pointer("/0/@id"))
 		.and_then(|input| input.as_str())
 		.ok_or(JsonLdTestError::InvalidManifest("invalid input"))?;
-	let input = JsonLdInput::<Value>::Reference(
-		Url::options()
-			.base_url(base.as_ref())
-			.parse(input)
-			.map_err(|_| JsonLdTestError::InvalidManifest("invalid input url"))?
-			.to_string()
-	);
+	let input = Url::options()
+		.base_url(base.as_ref())
+		.parse(input)
+		.map_err(|_| JsonLdTestError::InvalidManifest("invalid input url"))?;
+	let input = JsonLdInput::<Value>::Reference(input.as_str());
 	let output = match test_class {
 		TestClass::CompactTest => {
 			let context = value
@@ -218,12 +213,12 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 				.document
 				.to_parsed()
 				.map_err(|_| JsonLdTestError::JsonLdError(JsonLdErrorCode::LoadingDocumentFailed))?;
-			std::panic::AssertUnwindSafe(compact(&input, Some(Cow::Owned(context)), &options))
+			std::panic::AssertUnwindSafe(compact(input, Some(Cow::Owned(context)), &options))
 				.catch_unwind()
 				.await
 				.map(|output| output.map(|output| Value::Object(output)))
 		}
-		TestClass::ExpandTest => std::panic::AssertUnwindSafe(expand(&input, &options))
+		TestClass::ExpandTest => std::panic::AssertUnwindSafe(expand(input, &options))
 			.catch_unwind()
 			.await
 			.map(|output| output.map(|output| Value::Array(output))),

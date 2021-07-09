@@ -32,7 +32,7 @@ use crate::container::Container;
 use crate::context::process_context;
 use crate::error::JsonLdErrorCode::*;
 use crate::error::Result;
-use crate::expand::expand_internal;
+use crate::expand::{expand_internal, expand_object};
 use crate::remote::LoadDocumentOptions;
 use crate::util::ContextJson;
 
@@ -49,10 +49,17 @@ pub enum Document<T: ForeignMutableJson + BuildableJson> {
 }
 
 impl<T: ForeignMutableJson + BuildableJson> Document<T> {
-	pub fn to_parsed(self) -> std::result::Result<T, T::Err> {
+	pub fn into_parsed(self) -> std::result::Result<T, T::Err> {
 		match self {
 			Document::ParsedJson(v) => Ok(v),
 			Document::RawJson(v) => T::from_str(&v)
+		}
+	}
+
+	pub fn to_parsed(&self) -> std::result::Result<T, T::Err> {
+		match self {
+			Document::ParsedJson(v) => Ok(v.clone()),
+			Document::RawJson(v) => T::from_str(v)
 		}
 	}
 }
@@ -67,10 +74,10 @@ pub struct RemoteDocument<T: ForeignMutableJson + BuildableJson> {
 }
 
 #[derive(Clone, Debug)]
-pub enum JsonLdInput<T: ForeignMutableJson + BuildableJson> {
-	JsonObject(T::Object),
-	Reference(String),
-	RemoteDocument(RemoteDocument<T>)
+pub enum JsonLdInput<'a, T: ForeignMutableJson + BuildableJson> {
+	JsonObject(&'a T::Object),
+	Reference(&'a str),
+	RemoteDocument(&'a RemoteDocument<T>)
 }
 
 type JsonLdContext<'a, T> = Vec<JsonOrReference<'a, T>>;
@@ -253,16 +260,18 @@ where
 	}
 }
 
-pub async fn compact<'a, T, F>(input: &JsonLdInput<T>, ctx: Option<Cow<'a, T>>, options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object>
+pub async fn compact<'a, T, F>(input: JsonLdInput<'_, T>, ctx: Option<Cow<'a, T>>, options: &'a JsonLdOptions<'a, T, F>) -> Result<T::Object>
 where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
 	let options: JsonLdOptionsImpl<'a, T, F> = options.into();
+	let doc;
 	let input = if let JsonLdInput::Reference(iri) = input {
-		Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options.inner, None, Vec::new()).await?))
+		doc = remote::load_remote(&iri, &options.inner, None, Vec::new()).await?;
+		JsonLdInput::RemoteDocument(&doc)
 	} else {
-		Cow::Borrowed(input)
+		input
 	};
 
 	// 4)
@@ -273,9 +282,9 @@ where
 		},
 		loaded_contexts: MaybeOwned::Borrowed(options.loaded_contexts.as_ref())
 	};
-	let expanded_input = expand_with_loaded_contexts(&input, expand_options).await?;
+	let expanded_input = expand_with_loaded_contexts(input.clone(), expand_options).await?;
 
-	let context_base = if let JsonLdInput::RemoteDocument(ref doc) = *input {
+	let context_base = if let JsonLdInput::RemoteDocument(doc) = input {
 		Some(Url::parse(&doc.document_url).map_err(|e| err!(InvalidBaseIRI, , e))?)
 	} else {
 		options
@@ -352,7 +361,7 @@ where
 	Ok(compacted_output)
 }
 
-pub async fn expand<T, F>(input: &JsonLdInput<T>, options: &JsonLdOptions<'_, T, F>) -> Result<<T as ForeignJson>::Array>
+pub async fn expand<T, F>(input: JsonLdInput<'_, T>, options: &JsonLdOptions<'_, T, F>) -> Result<<T as ForeignJson>::Array>
 where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
@@ -360,15 +369,17 @@ where
 	expand_with_loaded_contexts(input, options.into()).await
 }
 
-async fn expand_with_loaded_contexts<T, F>(input: &JsonLdInput<T>, options: JsonLdOptionsImpl<'_, T, F>) -> Result<<T as ForeignJson>::Array>
+async fn expand_with_loaded_contexts<T, F>(input: JsonLdInput<'_, T>, options: JsonLdOptionsImpl<'_, T, F>) -> Result<<T as ForeignJson>::Array>
 where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
 {
+	let doc;
 	let input = if let JsonLdInput::Reference(iri) = input {
-		Cow::Owned(JsonLdInput::RemoteDocument(remote::load_remote(&iri, &options.inner, None, Vec::new()).await?))
+		doc = remote::load_remote(&iri, &options.inner, None, Vec::new()).await?;
+		JsonLdInput::RemoteDocument(&doc)
 	} else {
-		Cow::Borrowed(input)
+		input
 	};
 	let mut active_context = Context {
 		base_iri: options
@@ -376,7 +387,7 @@ where
 			.base
 			.as_ref()
 			.or_else(|| {
-				if let JsonLdInput::RemoteDocument(ref document) = *input {
+				if let JsonLdInput::RemoteDocument(ref document) = input {
 					Some(&document.document_url)
 				} else {
 					None
@@ -384,7 +395,7 @@ where
 			})
 			.map(|iri| Url::parse(iri).map_err(|e| err!(InvalidBaseIRI, , e)))
 			.transpose()?,
-		original_base_url: if let JsonLdInput::RemoteDocument(ref document) = *input {
+		original_base_url: if let JsonLdInput::RemoteDocument(document) = input {
 			Some(&document.document_url)
 		} else {
 			options.inner.base.as_ref()
@@ -412,7 +423,7 @@ where
 		)
 		.await?;
 	}
-	let (input, document_url) = match input.into_owned() {
+	let expanded_output = match input {
 		JsonLdInput::RemoteDocument(document) => {
 			if let Some(ref context_url) = document.context_url {
 				active_context = process_context(
@@ -427,13 +438,16 @@ where
 				)
 				.await?;
 			}
-			(document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?, Some(document.document_url))
+			let document_url = Url::parse(&document.document_url).map_err(|e| err!(InvalidBaseIRI, , e))?;
+			let input = document.document.to_parsed().map_err(|e| err!(LoadingDocumentFailed, , e))?;
+			expand_internal(&active_context, None, &input, Some(&document_url), &options, false).await?
 		}
-		JsonLdInput::JsonObject(json) => (json.into(), options.inner.base.clone()),
+		JsonLdInput::JsonObject(json) => {
+			let document_url = options.inner.base.as_ref().map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?;
+			expand_object(&active_context, None, json, document_url.as_ref(), &options, false).await?
+		},
 		JsonLdInput::Reference(_) => unreachable!()
 	};
-	let document_url = document_url.as_ref().map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?;
-	let expanded_output = expand_internal(&active_context, None, input, document_url.as_ref(), &options, false).await?;
 	Ok(match expanded_output {
 		Owned::Object(mut object) if object.len() == 1 && object.contains("@graph") => {
 			match object.remove("@graph").unwrap().into_enum() {

@@ -10,6 +10,7 @@ pub struct JsonLdError {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum JsonLdErrorCode {
 	CollidingKeywords,
 	ContextOverflow,
@@ -24,6 +25,7 @@ pub enum JsonLdErrorCode {
 	InvalidImportValue,
 	InvalidIndexValue,
 	InvalidIRIMapping,
+	InvalidJsonLiteral,
 	InvalidLanguageMapping,
 	InvalidLanguageMapValue,
 	InvalidLanguageTaggedString,
@@ -74,6 +76,7 @@ impl Display for JsonLdErrorCode {
 			InvalidImportValue => write!(f, "{}", "invalid @import value"),
 			InvalidIndexValue => write!(f, "{}", "invalid @index value"),
 			InvalidIRIMapping => write!(f, "{}", "invalid IRI mapping"),
+			InvalidJsonLiteral => write!(f, "{}", "invalid JSON literal"),
 			InvalidLanguageMapping => write!(f, "{}", "invalid language mapping"),
 			InvalidLanguageMapValue => write!(f, "{}", "invalid language map value"),
 			InvalidLanguageTaggedString => write!(f, "{}", "invalid language-tagged string"),

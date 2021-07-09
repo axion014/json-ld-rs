@@ -39,7 +39,7 @@ fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 
 fn process_direction<T: ForeignJson>(value: &T, nullify: bool) -> Result<Option<Direction>> {
 	Ok(match value.as_enum() {
-		Borrowed::String(direction) => Some(match direction.as_str() {
+		Borrowed::String(direction) => Some(match direction {
 			"ltr" => Direction::LTR,
 			"rtl" => Direction::RTL,
 			_ => return Err(err!(InvalidBaseDirection))
@@ -433,8 +433,8 @@ where
 				}
 				if let Some(container) = value.get("@container") {
 					match container.as_enum() {
-						Borrowed::String(container) => match container.as_str() {
-							"@set" | "@index" => definition.container_mapping = parse_container(once(container.as_str()))?,
+						Borrowed::String(container) => match container {
+							"@set" | "@index" => definition.container_mapping = parse_container(once(container))?,
 							_ => return Err(err!(InvalidReverseProperty))
 						},
 						Borrowed::Null => (),
@@ -456,11 +456,11 @@ where
 					)?,
 					Borrowed::String(container) => {
 						if options.processing_mode == JsonLdProcessingMode::JsonLd1_0 {
-							if let "@graph" | "@id" | "@type" = container.as_str() {
+							if let "@graph" | "@id" | "@type" = container {
 								return Err(err!(InvalidContainerMapping));
 							}
 						}
-						parse_container(once(container.as_str()))?
+						parse_container(once(container))?
 					}
 					_ => return Err(err!(InvalidContainerMapping))
 				};
@@ -612,7 +612,7 @@ where
 {
 	let inverse_context = active_context.inverse_context.get_or_init(|| create_inverse_context(&active_context));
 	let container_map = inverse_context.get(var).unwrap();
-	// dbg!(container_map, type_language, &preferred_values);
+	// dbg!(container_map, &containers, type_language, &preferred_values);
 	containers
 		.iter()
 		.filter_map(|container| container_map.get(container))

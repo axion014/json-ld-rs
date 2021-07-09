@@ -2,7 +2,8 @@
 //
 // Spec correspondence:
 // expand_internal - the entire algorithm
-// expand_object - (part of 12,)13~14
+// expand_object - 6~
+// expand_object_properties - (part of 12,)13~14
 // expand_language_map - 13.7
 // expand_language_value - 13.7.4.2.*
 // expand_index_map - 13.8
@@ -39,7 +40,7 @@ use crate::{Context, Direction, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessi
 pub(crate) async fn expand_internal<'a, T, F>(
 	active_context: &Context<'a, T>,
 	active_property: Option<&'a str>,
-	element: T,
+	element: &T,
 	base_url: Option<&'a Url>,
 	options: &JsonLdOptionsImpl<T, F>,
 	from_map: bool
@@ -48,14 +49,13 @@ where
 	T: ForeignMutableJson + BuildableJson,
 	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
-	let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
-	let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
-	let property_scoped_context = definition.map_or(&[] as &[_], |definition| &definition.context);
-	match element.into_enum() {
-		Owned::Null => Ok(Owned::Null),
-		Owned::Array(array) => {
+	match element.as_enum() {
+		Borrowed::Null => Ok(Owned::Null),
+		Borrowed::Array(array) => {
+			let frame_expansion = options.inner.frame_expansion && active_property != Some("@default");
+			let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
 			let mut result = T::empty_array();
-			for item in array {
+			for item in array.iter() {
 				let expanded_item = expand_internal(
 					active_context,
 					active_property,
@@ -87,175 +87,20 @@ where
 			}
 			Ok(Owned::Array(result))
 		}
-		Owned::Object(obj) => {
-			let mut active_context = Cow::Borrowed(if_chain! {
-				if let Some(previous_context) = active_context.previous_context.as_deref();
-				if !from_map;
-				if if obj.len() == 1 {
-					match expand_iri!(active_context, obj.iter().next().unwrap().0)?.as_deref() {
-						Some("@value") | Some("@id") => false,
-						_ => true
-					}
-				} else {
-					!obj.iter().try_find(|(key, _)| Ok(expand_iri!(active_context, key)?.as_deref() == Some("@value")))?.is_some()
-				};
-				then { previous_context } else { active_context }
-			});
-			if !property_scoped_context.is_empty() {
-				active_context = Cow::Owned(
-					process_context(
-						&active_context,
-						property_scoped_context,
-						definition.unwrap().base_url.as_ref(),
-						options,
-						&FrozenSet::new(),
-						true,
-						true,
-						true
-					)
-					.await?
-				);
-			}
-			let mut obj = obj.into_iter().collect::<BTreeMap<_, _>>();
-			if let Some(context) = obj.remove("@context") {
-				active_context = Cow::Owned(
-					process_context(
-						&active_context,
-						&OptionalContexts::from_json(Cow::Owned(context))?,
-						base_url,
-						options,
-						&FrozenSet::new(),
-						false,
-						true,
-						true
-					)
-					.await?
-				);
-			}
-			let type_scoped_context = active_context.clone();
-			let mut input_type = None;
-			for (key, value) in obj.iter() {
-				if expand_iri!(&active_context, key)?.as_deref() == Some("@type") {
-					if let Some(value) = value.as_array() {
-						for (term, context) in value
-							.iter()
-							.filter_map(|term| term.as_string())
-							.collect::<BTreeSet<_>>()
-							.iter()
-							.map(|term| {
-								input_type = expand_iri!(&active_context, term)?;
-								Ok(term)
-							})
-							.filter_map(|term| {
-								term.map(|term| type_scoped_context.term_definitions.get(*term).map(|definition| (term, &definition.context)))
-									.transpose()
-							})
-							.collect::<Result<BTreeMap<_, _>>>()?
-						{
-							active_context = Cow::Owned(
-								process_context(
-									&active_context,
-									&context,
-									type_scoped_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
-									options,
-									&FrozenSet::new(),
-									false,
-									false,
-									true
-								)
-								.await?
-							);
-						}
-					} else if let Some(term) = value.as_string() {
-						input_type = expand_iri!(&active_context, term)?;
-						if let Some(context) = type_scoped_context.term_definitions.get(term).map(|definition| &definition.context) {
-							active_context = Cow::Owned(
-								process_context(
-									&active_context,
-									&context,
-									type_scoped_context.term_definitions.get(term).unwrap().base_url.as_ref(),
-									options,
-									&FrozenSet::new(),
-									false,
-									false,
-									true
-								)
-								.await?
-							);
-						}
-					}
-				}
-			}
-			let mut result = T::empty_object();
-			expand_object(&mut result, &active_context, &type_scoped_context, active_property, obj, base_url, &input_type, options).await?;
-			if let Some(value) = result.get("@value") {
-				let mut count = 1;
-				let mut literal = false;
-				let mut invalid_typed_value = false;
-				if let Some(ty) = result.get("@type") {
-					count += 1;
-					if result.contains("@language") || result.contains("@direction") {
-						return Err(err!(InvalidValueObject));
-					}
-					if ty.as_string() == Some("@json") {
-						literal = true;
-					} else {
-						invalid_typed_value = !ty.as_string().map_or(false, |ty| is_iri(ty));
-					}
-				} else {
-					if result.contains("@language") {
-						count += 1;
-					}
-					if result.contains("@direction") {
-						count += 1;
-					}
-				}
-				if result.contains("@index") {
-					count += 1;
-				}
-				if result.len() != count {
-					return Err(err!(InvalidValueObject));
-				}
-				if !literal {
-					if value.is_null() || value.as_array().map_or(false, |array| array.is_empty()) {
-						return Ok(Owned::Null);
-					}
-					if value.as_string().is_none() && result.contains("@language") {
-						return Err(err!(InvalidLanguageTaggedValue));
-					}
-					if invalid_typed_value {
-						return Err(err!(InvalidTypedValue));
-					}
-				}
-			} else if result.get("@type").map_or(false, |ty| ty.as_array().is_none()) {
-				let ty = json!(T, [result.remove("@type").unwrap()]);
-				result.insert("@type".to_string(), ty);
-			} else if let Some(set) = result.remove("@set") {
-				if result.len() != if result.contains("@index") { 1 } else { 0 } {
-					return Err(err!(InvalidSetOrListObject));
-				}
-				match set.into_enum() {
-					Owned::Object(set) => result = set,
-					set => return Ok(set)
-				}
-			} else if result.contains("@list") && result.len() != if result.contains("@index") { 2 } else { 1 } {
-				return Err(err!(InvalidSetOrListObject));
-			}
-			if (result.len() == 1 && result.contains("@language"))
-				|| (active_property.is_none() || active_property == Some("@graph"))
-					&& (result.is_empty()
-						|| result.contains("@value")
-						|| result.contains("@list")
-						|| (!options.inner.frame_expansion && result.len() == 1 && result.contains("@id")))
-			{
-				return Ok(Owned::Null);
-			}
-			Ok(Owned::Object(result))
-		}
+		Borrowed::Object(obj) => expand_object(
+			active_context,
+			active_property,
+			obj,
+			base_url,
+			options,
+			from_map
+		).await,
 		value => {
 			if active_property.is_none() || active_property == Some("@graph") {
 				return Ok(Owned::Null);
 			}
+			let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
+			let property_scoped_context = definition.map_or(&[] as &[_], |definition| &definition.context);
 			Ok(Owned::Object(if !property_scoped_context.is_empty() {
 				expand_value(
 					&process_context(
@@ -280,12 +125,192 @@ where
 }
 
 #[async_recursion(?Send)]
-async fn expand_object<'a, T, F>(
+pub(crate) async fn expand_object<'a, T, F>(
+	active_context: &Context<'a, T>,
+	active_property: Option<&'a str>,
+	obj: &'a impl MutableObject<T>,
+	base_url: Option<&'a Url>,
+	options: &JsonLdOptionsImpl<T, F>,
+	from_map: bool
+) -> Result<Owned<T>>
+where
+	T: ForeignMutableJson + BuildableJson,
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
+{
+	let definition = active_property.and_then(|active_property| active_context.term_definitions.get(active_property));
+	let property_scoped_context = definition.map_or(&[] as &[_], |definition| &definition.context);
+	let mut active_context = Cow::Borrowed(if_chain! {
+		if let Some(previous_context) = active_context.previous_context.as_deref();
+		if !from_map;
+		if if obj.len() == 1 {
+			match expand_iri!(active_context, obj.iter().next().unwrap().0)?.as_deref() {
+				Some("@value") | Some("@id") => false,
+				_ => true
+			}
+		} else {
+			!obj.iter().try_find(|(key, _)| Ok(expand_iri!(active_context, key)?.as_deref() == Some("@value")))?.is_some()
+		};
+		then { previous_context } else { active_context }
+	});
+	if !property_scoped_context.is_empty() {
+		active_context = Cow::Owned(
+			process_context(
+				&active_context,
+				property_scoped_context,
+				definition.unwrap().base_url.as_ref(),
+				options,
+				&FrozenSet::new(),
+				true,
+				true,
+				true
+			)
+			.await?
+		);
+	}
+	let obj = obj.iter().collect::<BTreeMap<_, _>>();
+	if let Some(context) = obj.get("@context") {
+		active_context = Cow::Owned(
+			process_context(
+				&active_context,
+				&OptionalContexts::from_json(Cow::Borrowed(*context))?,
+				base_url,
+				options,
+				&FrozenSet::new(),
+				false,
+				true,
+				true
+			)
+			.await?
+		);
+	}
+	let type_scoped_context = active_context.clone();
+	let mut input_type = None;
+	for (key, value) in obj.iter() {
+		if expand_iri!(&active_context, key)?.as_deref() == Some("@type") {
+			if let Some(value) = value.as_array() {
+				for (term, context) in value
+					.iter()
+					.filter_map(|term| term.as_string())
+					.collect::<BTreeSet<_>>()
+					.iter()
+					.map(|term| {
+						input_type = expand_iri!(&active_context, term)?;
+						Ok(term)
+					})
+					.filter_map(|term| {
+						term.map(|term| type_scoped_context.term_definitions.get(*term).map(|definition| (term, &definition.context)))
+							.transpose()
+					})
+					.collect::<Result<BTreeMap<_, _>>>()?
+				{
+					active_context = Cow::Owned(
+						process_context(
+							&active_context,
+							&context,
+							type_scoped_context.term_definitions.get(*term).unwrap().base_url.as_ref(),
+							options,
+							&FrozenSet::new(),
+							false,
+							false,
+							true
+						)
+						.await?
+					);
+				}
+			} else if let Some(term) = value.as_string() {
+				input_type = expand_iri!(&active_context, term)?;
+				if let Some(context) = type_scoped_context.term_definitions.get(term).map(|definition| &definition.context) {
+					active_context = Cow::Owned(
+						process_context(
+							&active_context,
+							&context,
+							type_scoped_context.term_definitions.get(term).unwrap().base_url.as_ref(),
+							options,
+							&FrozenSet::new(),
+							false,
+							false,
+							true
+						)
+						.await?
+					);
+				}
+			}
+		}
+	}
+	let mut result = T::empty_object();
+	expand_object_properties(&mut result, &active_context, &type_scoped_context, active_property, obj, base_url, &input_type, options).await?;
+	if let Some(value) = result.get("@value") {
+		let mut count = 1;
+		let mut literal = false;
+		let mut invalid_typed_value = false;
+		if let Some(ty) = result.get("@type") {
+			count += 1;
+			if result.contains("@language") || result.contains("@direction") {
+				return Err(err!(InvalidValueObject));
+			}
+			if ty.as_string() == Some("@json") {
+				literal = true;
+			} else {
+				invalid_typed_value = !ty.as_string().map_or(false, |ty| is_iri(ty));
+			}
+		} else {
+			if result.contains("@language") {
+				count += 1;
+			}
+			if result.contains("@direction") {
+				count += 1;
+			}
+		}
+		if result.contains("@index") {
+			count += 1;
+		}
+		if result.len() != count {
+			return Err(err!(InvalidValueObject));
+		}
+		if !literal {
+			if value.is_null() || value.as_array().map_or(false, |array| array.is_empty()) {
+				return Ok(Owned::Null);
+			}
+			if value.as_string().is_none() && result.contains("@language") {
+				return Err(err!(InvalidLanguageTaggedValue));
+			}
+			if invalid_typed_value {
+				return Err(err!(InvalidTypedValue));
+			}
+		}
+	} else if result.get("@type").map_or(false, |ty| ty.as_array().is_none()) {
+		let ty = json!(T, [result.remove("@type").unwrap()]);
+		result.insert("@type".to_string(), ty);
+	} else if let Some(set) = result.remove("@set") {
+		if result.len() != if result.contains("@index") { 1 } else { 0 } {
+			return Err(err!(InvalidSetOrListObject));
+		}
+		match set.into_enum() {
+			Owned::Object(set) => result = set,
+			set => return Ok(set)
+		}
+	} else if result.contains("@list") && result.len() != if result.contains("@index") { 2 } else { 1 } {
+		return Err(err!(InvalidSetOrListObject));
+	}
+	if (result.len() == 1 && result.contains("@language"))
+		|| (active_property.is_none() || active_property == Some("@graph"))
+			&& (result.is_empty()
+				|| result.contains("@value")
+				|| result.contains("@list")
+				|| (!options.inner.frame_expansion && result.len() == 1 && result.contains("@id")))
+	{
+		return Ok(Owned::Null);
+	}
+	Ok(Owned::Object(result))
+}
+
+#[async_recursion(?Send)]
+async fn expand_object_properties<'a, T, F>(
 	result: &mut T::Object,
 	active_context: &Context<T>,
 	type_scoped_context: &Context<T>,
 	active_property: Option<&'a str>,
-	element: impl MutableObject<T> + 'a,
+	element: impl IntoIterator<Item = (&'a str, &'a T)> + 'a,
 	base_url: Option<&'a Url>,
 	input_type: &Option<String>,
 	options: &JsonLdOptionsImpl<'a, T, F>
@@ -320,55 +345,54 @@ where
 			.await?;
 			continue;
 		}
-		let definition = active_context.term_definitions.get(key.as_str());
+		let definition = active_context.term_definitions.get(key);
 		let container_mapping = definition.map_or(&container!(None), |definition| &definition.container_mapping);
 		let mut expanded_value = if definition.and_then(|definition| definition.type_mapping.as_deref()) == Some("@json") {
-			Owned::Object(json!(T, {"@value": value, "@type": "@json"}))
+			Owned::Object(json!(T, {"@value": value.clone(), "@type": "@json"}))
 		} else {
-			match value.into_enum() {
-				Owned::Object(obj) => {
-					if let LanguageContainer!() = container_mapping {
-						let direction = definition
-							.and_then(|definition| definition.direction_mapping.as_ref())
-							.or(active_context.default_base_direction.as_ref());
-						Owned::Array(if options.inner.ordered {
-							expand_language_map(active_context, obj.into_iter().collect::<BTreeMap<_, _>>(), direction)?
-						} else {
-							expand_language_map(active_context, obj, direction)?
-						})
-					} else if let Some(index_key) = match container_mapping {
-						IndexContainer!() => Some(definition.and_then(|definition| definition.index_mapping.as_deref()).unwrap_or("@index")),
-						TypeContainer!() => Some("@type"),
-						IdContainer!() => Some("@id"),
-						_ => None
-					} {
-						let map_context = if let IndexContainer!() = container_mapping {
-							active_context
-						} else {
-							active_context.previous_context.as_deref().unwrap_or(active_context)
-						};
-						let as_graph = container_mapping.is_graph();
-						let property_index = index_key != "@index" && container_mapping.is_index();
-						Owned::Array(if options.inner.ordered {
-							expand_index_map(
-								map_context,
-								&key,
-								obj.into_iter().collect::<BTreeMap<_, _>>(),
-								index_key,
-								as_graph,
-								property_index,
-								base_url,
-								options
-							)
-							.await?
-						} else {
-							expand_index_map(map_context, &key, obj, index_key, as_graph, property_index, base_url, options).await?
-						})
+			if let Some(obj) = value.as_object() {
+				if let LanguageContainer!() = container_mapping {
+					let direction = definition
+						.and_then(|definition| definition.direction_mapping.as_ref())
+						.or(active_context.default_base_direction.as_ref());
+					Owned::Array(if options.inner.ordered {
+						expand_language_map(active_context, obj.iter().collect::<BTreeMap<_, _>>(), direction)?
 					} else {
-						expand_internal(&active_context, Some(&key), obj.into(), base_url, options, false).await?
-					}
+						expand_language_map(active_context, obj.iter(), direction)?
+					})
+				} else if let Some(index_key) = match container_mapping {
+					IndexContainer!() => Some(definition.and_then(|definition| definition.index_mapping.as_deref()).unwrap_or("@index")),
+					TypeContainer!() => Some("@type"),
+					IdContainer!() => Some("@id"),
+					_ => None
+				} {
+					let map_context = if let IndexContainer!() = container_mapping {
+						active_context
+					} else {
+						active_context.previous_context.as_deref().unwrap_or(active_context)
+					};
+					let as_graph = container_mapping.is_graph();
+					let property_index = index_key != "@index" && container_mapping.is_index();
+					Owned::Array(if options.inner.ordered {
+						expand_index_map(
+							map_context,
+							&key,
+							obj.iter().collect::<BTreeMap<_, _>>(),
+							index_key,
+							as_graph,
+							property_index,
+							base_url,
+							options
+						)
+						.await?
+					} else {
+						expand_index_map(map_context, &key, obj.iter(), index_key, as_graph, property_index, base_url, options).await?
+					})
+				} else {
+					expand_object(&active_context, Some(&key), obj, base_url, options, false).await?
 				}
-				value => expand_internal(&active_context, Some(&key), value.into_untyped(), base_url, options, false).await?
+			} else {
+				expand_internal(&active_context, Some(&key), value, base_url, options, false).await?
 			}
 		};
 		if let Owned::Null = expanded_value {
@@ -444,34 +468,29 @@ where
 	return Ok(());
 }
 
-fn expand_language_map<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>, language_map: impl MutableObject<T>, direction: Option<&Direction>) -> Result<T::Array> {
+fn expand_language_map<'a, T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>, language_map: impl IntoIterator<Item = (&'a str, &'a T)>, direction: Option<&Direction>) -> Result<T::Array> {
 	let mut result = T::empty_array();
-	for (language, language_value) in language_map {
+	for (language, language_value) in language_map.into_iter() {
 		let language = if language != "@none" && expand_iri!(active_context, &language)?.as_deref() != Some("@none") {
 			Some(language)
 		} else {
 			None
 		};
-		match language_value.into_enum() {
-			Owned::Array(array) => {
-				for item in array.into_iter().filter_map(|item| expand_language_value(language.as_deref(), item, direction).transpose()) {
-					result.push_back(item?.into());
-				}
+		if let Some(array) = language_value.as_array() {
+			for item in array.iter().filter_map(|item| expand_language_value(language.as_deref(), item, direction).transpose()) {
+				result.push_back(item?.into());
 			}
-			language_value => {
-				if let Some(expanded_item) = expand_language_value(language.as_deref(), language_value.into_untyped(), direction)? {
-					result.push_back(expanded_item.into());
-				}
-			}
+		} else if let Some(expanded_item) = expand_language_value(language.as_deref(), language_value, direction)? {
+			result.push_back(expanded_item.into());
 		}
 	}
 	Ok(result)
 }
 
-fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option<&str>, language_value: T, direction: Option<&Direction>) -> Result<Option<T::Object>> {
-	match language_value.into_enum() {
-		Owned::Null => Ok(None),
-		Owned::String(language_value) => {
+fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option<&str>, language_value: &T, direction: Option<&Direction>) -> Result<Option<T::Object>> {
+	match language_value.as_enum() {
+		Borrowed::Null => Ok(None),
+		Borrowed::String(language_value) => {
 			let mut v: T::Object = json!(T, { "@value": language_value });
 			if let Some(language) = language {
 				v.insert("@language".to_string(), language.into());
@@ -487,10 +506,10 @@ fn expand_language_value<T: ForeignMutableJson + BuildableJson>(language: Option
 	}
 }
 
-async fn expand_index_map<T, F>(
+async fn expand_index_map<'a, T, F>(
 	map_context: &Context<'_, T>,
 	key: &str,
-	index_map: impl MutableObject<T>,
+	index_map: impl IntoIterator<Item = (&'a str, &'a T)>,
 	index_key: &str,
 	as_graph: bool,
 	property_index: bool,
@@ -499,13 +518,13 @@ async fn expand_index_map<T, F>(
 ) -> Result<T::Array>
 where
 	T: ForeignMutableJson + BuildableJson,
-	F: for<'a> Fn(&'a str, &'a Option<LoadDocumentOptions>) -> BoxFuture<'a, Result<RemoteDocument<T>>> + Clone
+	F: for<'b> Fn(&'b str, &'b Option<LoadDocumentOptions>) -> BoxFuture<'b, Result<RemoteDocument<T>>> + Clone
 {
 	let mut result = T::empty_array();
-	for (index, index_value) in index_map {
+	for (index, index_value) in index_map.into_iter() {
 		let map_context = if_chain! {
 			if index_key == "@type";
-			if let Some(definition) = map_context.term_definitions.get(index.as_str());
+			if let Some(definition) = map_context.term_definitions.get(index);
 			if !definition.context.is_empty();
 			then {
 				Cow::Owned(process_context(&map_context, &definition.context, definition.base_url.as_ref(),
@@ -558,7 +577,7 @@ fn expand_index_value<T: ForeignMutableJson + BuildableJson>(
 	if let Some(expanded_index) = expanded_index {
 		if expanded_index != "@none" {
 			if property_index {
-				let reexpanded_index = expand_value(map_context, map_context.term_definitions.get(index_key), Owned::String(index.to_string()))?;
+				let reexpanded_index = expand_value(map_context, map_context.term_definitions.get(index_key), Borrowed::String(index))?;
 				if let Some(expanded_index_key) = expand_iri!(map_context, index_key)? {
 					let mut array: T::Array = json!(T, [reexpanded_index]);
 					if let Some(index_property_values) = index_value.remove(&expanded_index_key) {
@@ -618,7 +637,7 @@ where
 			return Err(err!(InvalidNestValue));
 		}
 	}
-	expand_object(result, active_context, type_scoped_context, active_property, nested_value, base_url, input_type, options).await
+	expand_object_properties(result, active_context, type_scoped_context, active_property, nested_value.iter(), base_url, input_type, options).await
 }
 
 async fn expand_keyword<T, F>(
@@ -627,9 +646,9 @@ async fn expand_keyword<T, F>(
 	active_context: &Context<'_, T>,
 	type_scoped_context: &Context<'_, T>,
 	active_property: Option<&str>,
-	key: String,
+	key: &str,
 	expanded_property: String,
-	value: T,
+	value: &T,
 	base_url: Option<&Url>,
 	input_type: &Option<String>,
 	options: &JsonLdOptionsImpl<'_, T, F>
@@ -646,12 +665,12 @@ where
 			if options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_0 && result.contains(&key) {
 				return Err(err!(CollidingKeywords));
 			}
-			match value.into_enum() {
-				Owned::String(iri) => {
+			match value.as_enum() {
+				Borrowed::String(iri) => {
 					let iri = expand_iri!(type_scoped_context, &iri, true)?.map_or(T::null(), |iri| iri.into());
 					add_value(result, &expanded_property, iri, false);
 				}
-				Owned::Array(array) => {
+				Borrowed::Array(array) => {
 					let expanded = array
 						.iter()
 						.map(|iri| iri.as_string().ok_or(err!(InvalidTypeValue)))
@@ -660,11 +679,11 @@ where
 						add_value(result, &expanded_property, iri?, false);
 					}
 				}
-				Owned::Object(obj) if options.inner.frame_expansion => {
+				Borrowed::Object(obj) if options.inner.frame_expansion => {
 					result.insert(
 						expanded_property,
 						if obj.is_empty() {
-							obj.into()
+							T::empty_object().into()
 						} else if let Some(default) = obj.get("@default").and_then(|default| default.as_string()) {
 							json!(T, {"@default": expand_iri!(type_scoped_context, default, true)?.map_or(T::null(), |default| default.into())})
 						} else {
@@ -683,15 +702,15 @@ where
 		),
 		_ if result.contains(&expanded_property) => return Err(err!(CollidingKeywords)),
 		"@id" => {
-			result.insert(expanded_property, match value.into_enum() {
-				Owned::String(iri) => expand_iri!(active_context, &iri, true, false)?.map_or(T::null(), |iri| iri.into()),
-				Owned::Array(array) if options.inner.frame_expansion => array
+			result.insert(expanded_property, match value.as_enum() {
+				Borrowed::String(iri) => expand_iri!(active_context, &iri, true, false)?.map_or(T::null(), |iri| iri.into()),
+				Borrowed::Array(array) if options.inner.frame_expansion => array
 					.iter()
 					.map(|iri| iri.as_string().ok_or(err!(InvalidIdValue)))
 					.flat_map(|iri| iri.map(|iri| Ok(expand_iri!(active_context, &iri, true, false)?.map_or(T::null(), |iri| iri.into()))))
 					.collect::<Result<T::Array>>()?
 					.into(),
-				Owned::Object(obj) if options.inner.frame_expansion && obj.is_empty() => obj.into(),
+				Borrowed::Object(obj) if options.inner.frame_expansion && obj.is_empty() => T::empty_object().into(),
 				_ => return Err(err!(InvalidIdValue))
 			});
 		}
@@ -713,42 +732,42 @@ where
 					if options.inner.processing_mode == JsonLdProcessingMode::JsonLd1_0 {
 						return Err(err!(InvalidValueObjectValue));
 					}
-					value
+					value.clone()
 				} else {
-					match value.into_enum() {
-						Owned::Array(array) if options.inner.frame_expansion => array
+					match value.as_enum() {
+						Borrowed::Array(array) if options.inner.frame_expansion => array
 							.iter()
 							.map(|iri| iri.as_string().ok_or(err!(InvalidValueObjectValue)).map(|iri| iri.into()))
 							.collect::<Result<T::Array>>()?
 							.into(),
-						Owned::Object(obj) if options.inner.frame_expansion && obj.is_empty() => obj.into(),
-						Owned::Array(_) | Owned::Object(_) => return Err(err!(InvalidValueObjectValue)),
-						value => value.into_untyped()
+						Borrowed::Object(obj) if options.inner.frame_expansion && obj.is_empty() => value.clone(),
+						Borrowed::Array(_) | Borrowed::Object(_) => return Err(err!(InvalidValueObjectValue)),
+						_ => value.clone()
 					}
 				}
 			);
 		}
 		"@language" => {
-			result.insert(expanded_property, match value.into_enum() {
-				Owned::String(lang) => lang.into(),
-				Owned::Array(array) if options.inner.frame_expansion => array
+			result.insert(expanded_property, match value.as_enum() {
+				Borrowed::String(lang) => lang.into(),
+				Borrowed::Array(array) if options.inner.frame_expansion => array
 					.iter()
 					.map(|lang| lang.as_string().ok_or(err!(InvalidLanguageTaggedString)).map(|lang| lang.into()))
 					.collect::<Result<T::Array>>()?
 					.into(),
-				Owned::Object(obj) if options.inner.frame_expansion && obj.is_empty() => obj.into(),
+				Borrowed::Object(obj) if options.inner.frame_expansion && obj.is_empty() => T::empty_object().into(),
 				_ => return Err(err!(InvalidLanguageTaggedString))
 			});
 		}
 		"@direction" => {
-			result.insert(expanded_property, match value.into_enum() {
-				Owned::String(dir) => {
+			result.insert(expanded_property, match value.as_enum() {
+				Borrowed::String(dir) => {
 					if dir != "ltr" && dir != "rtl" {
 						return Err(err!(InvalidBaseDirection));
 					}
 					dir.into()
 				}
-				Owned::Array(array) if options.inner.frame_expansion => array
+				Borrowed::Array(array) if options.inner.frame_expansion => array
 					.iter()
 					.map(|dir| dir.as_string().ok_or(err!(InvalidBaseDirection)))
 					.flat_map(|dir| {
@@ -761,7 +780,7 @@ where
 					})
 					.collect::<Result<T::Array>>()?
 					.into(),
-				Owned::Object(obj) if options.inner.frame_expansion && obj.is_empty() => obj.into(),
+				Borrowed::Object(obj) if options.inner.frame_expansion && obj.is_empty() => T::empty_object().into(),
 				_ => return Err(err!(InvalidBaseDirection))
 			});
 		}
@@ -822,7 +841,7 @@ where
 			}
 		}
 		"@nest" => {
-			nests.insert(key, value);
+			nests.insert(key.to_string(), value.clone());
 		}
 		_ => {}
 	}
@@ -917,9 +936,9 @@ where
 	Ok(Some(value.to_string()))
 }
 
-fn expand_value<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>, definition: Option<&TermDefinition<T>>, value: typed_json::Owned<T>) -> Result<T::Object> {
+fn expand_value<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>, definition: Option<&TermDefinition<T>>, value: typed_json::Borrowed<T>) -> Result<T::Object> {
 	let type_mapping = definition.and_then(|definition| definition.type_mapping.as_deref());
-	if let (Some(type_mapping @ ("@id" | "@vocab")), Owned::String(value)) = (type_mapping, &value) {
+	if let (Some(type_mapping @ ("@id" | "@vocab")), Borrowed::String(value)) = (type_mapping, &value) {
 		return Ok(json!(T, {"@id": expand_iri!(active_context, value, true, type_mapping == "@vocab")?
 			.map_or(T::null(), |iri| iri.into())}));
 	}
@@ -928,7 +947,7 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(active_context: &Context<
 		if type_mapping != "@id" && type_mapping != "@vocab" && type_mapping != "@none" {
 			result.insert("@type".to_string(), type_mapping.into());
 		}
-	} else if let Owned::String(_) = value {
+	} else if let Borrowed::String(_) = value {
 		if let Some(language) = definition
 			.and_then(|definition| definition.language_mapping.as_ref().map(|lang| lang.as_deref()))
 			.unwrap_or(active_context.default_language.as_deref())
@@ -944,6 +963,12 @@ fn expand_value<T: ForeignMutableJson + BuildableJson>(active_context: &Context<
 			}
 		}
 	}
-	result.insert("@value".to_string(), value.into_untyped());
+	result.insert("@value".to_string(), match value {
+		Borrowed::Number(n) => n.map(|n| n.into()).ok_or(err!(InvalidJsonLiteral))?,
+		Borrowed::String(s) => s.into(),
+		Borrowed::Null => T::null(),
+		Borrowed::Bool(b) => b.into(),
+		_ => panic!("a compound value were passed into expand_value")
+	});
 	Ok(result)
 }
