@@ -477,7 +477,7 @@ where
 				if let TypeContainer!() = definition.container_mapping {
 					match definition.type_mapping.as_deref() {
 						None => definition.type_mapping = Some("@id".to_string()),
-						Some("@id") | Some("vocab") => {}
+						Some("@id") | Some("@vocab") => {}
 						_ => return Err(err!(InvalidTypeMapping))
 					}
 				}
