@@ -491,16 +491,16 @@ where
 				add_containers!(index, indexes);
 			}
 		}
+		let mut set_default = || {
+			type_language = "@type";
+			type_language_value = "@id".to_string();
+			add_containers!(id, ids, type, types);
+		};
 		if reverse {
 			type_language = "@type";
 			type_language_value = "@reverse".to_string();
 			containers.push(container!(set));
 		} else if let Some(value) = value {
-			let mut set_default = || {
-				type_language = "@type";
-				type_language_value = "@id".to_string();
-				add_containers!(id, ids, type, types);
-			};
 			if let Some(value) = value.as_object() {
 				if let Some(list) = value.get("@list") {
 					let list = list.as_array().unwrap();
@@ -595,6 +595,9 @@ where
 				set_default();
 				containers.push(container!(set));
 			}
+		} else {
+			set_default();
+			containers.push(container!(set));
 		}
 		containers.push(container!(None));
 		if options.processing_mode != JsonLdProcessingMode::JsonLd1_0 {
