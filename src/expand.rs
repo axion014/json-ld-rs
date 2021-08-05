@@ -534,7 +534,7 @@ where
 			}
 		};
 
-		let expanded_index = expand_iri!(&map_context, &index, index_key == "@id")?;
+		let expanded_index = expand_iri!(&map_context, &index, index_key == "@id", index_key != "@id")?;
 		let index_value = expand_internal(&map_context, Some(key), index_value, base_url, options, true).await?;
 		if let Owned::Array(array) = index_value {
 			for item in array
