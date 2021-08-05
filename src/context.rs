@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::iter::once;
+use std::ops::ControlFlow;
 
 use elsa::FrozenSet;
 
@@ -335,7 +336,7 @@ where
 		if let Some(id) = id {
 			if id != term {
 				if !is_jsonld_keyword(id) && looks_like_a_jsonld_keyword(id) {
-					return Ok(());
+					return Ok(ControlFlow::Break(()));
 				}
 				definition.iri = process_context_iri!(active_context, id, local_context, defined, options)?;
 				if term.starts_with(":") || term.ends_with(":") || term.contains("/") {
@@ -349,7 +350,7 @@ where
 						definition.prefix = true;
 					}
 				}
-				return Ok(());
+				return Ok(ControlFlow::Continue(()));
 			}
 		}
 		if let Some((prefix, suffix)) = as_compact_iri(term) {
@@ -376,17 +377,25 @@ where
 		} else {
 			return Err(err!(InvalidIRIMapping));
 		}
-		Ok(())
+		Ok(ControlFlow::Continue(()))
 	};
 
 	match value {
-		Borrowed::String(id) => process_id(Some(&id), true)?,
+		Borrowed::String(id) => {
+			if process_id(Some(&id), true)? == ControlFlow::Break(()) {
+				return Ok(());
+			}
+		}
 		Borrowed::Null => {}
 		Borrowed::Object(value) => {
 			if value.get("@reverse").is_none() {
 				if let Some(id) = value.get("@id") {
 					match id.as_enum() {
-						Borrowed::String(id) => process_id(Some(&id), false)?,
+						Borrowed::String(id) => {
+							if process_id(Some(&id), false)? == ControlFlow::Break(()) {
+								return Ok(());
+							}
+						}
 						Borrowed::Null => {}
 						_ => return Err(err!(InvalidIRIMapping))
 					}
