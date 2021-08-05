@@ -142,7 +142,14 @@ impl Borrow<str> for TermDefinitionKey {
 	}
 }
 
-type InverseContext = HashMap<String, HashMap<Container, HashMap<String, HashMap<String, String>>>>;
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum TypeOrLanguage {
+	Type,
+	Language,
+	Any
+}
+
+type InverseContext = HashMap<String, HashMap<Container, HashMap<TypeOrLanguage, HashMap<String, String>>>>;
 
 #[derive(Clone, Debug)]
 pub struct Context<'a, T>

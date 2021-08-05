@@ -24,7 +24,8 @@ use crate::expand::expand_iri;
 use crate::remote::{load_remote, LoadDocumentOptions};
 use crate::util::{as_compact_iri, is_iri, is_jsonld_keyword, looks_like_a_jsonld_keyword, make_lang_dir, resolve, ContextJson};
 use crate::{
-	Context, Direction, InverseContext, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, JsonOrReference, LoadedContext, OptionalContexts, RemoteDocument, TermDefinition
+	Context, Direction, InverseContext, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, JsonOrReference, LoadedContext, OptionalContexts, RemoteDocument, TermDefinition,
+	TypeOrLanguage
 };
 
 const MAX_CONTEXTS: usize = 25; // The number's placeholder
@@ -558,7 +559,7 @@ where
 	Ok(())
 }
 
-pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>) -> InverseContext {
+pub(crate) fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>) -> InverseContext {
 	let mut result = InverseContext::new();
 	for (key, value) in active_context.term_definitions.iter() {
 		let container_map = if let Some(ref iri) = value.iri {
@@ -570,25 +571,25 @@ pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_cont
 		// concat all containers
 		let type_language_map = container_map.entry_ownable(&value.container_mapping).or_insert_with(|| {
 			let mut type_language_map = HashMap::new();
-			type_language_map.insert("@language".to_string(), HashMap::new());
-			type_language_map.insert("@type".to_string(), HashMap::new());
+			type_language_map.insert(TypeOrLanguage::Language, HashMap::new());
+			type_language_map.insert(TypeOrLanguage::Type, HashMap::new());
 			let mut any = HashMap::new();
 			any.insert("@none".to_string(), key.to_string());
-			type_language_map.insert("@any".to_string(), any);
+			type_language_map.insert(TypeOrLanguage::Any, any);
 			type_language_map
 		});
 		let mut insert = |container, entry: &str| {
-			type_language_map.get_mut(container).unwrap().entry_ownable(entry).or_insert_with(|| key.to_string());
+			type_language_map.get_mut(&container).unwrap().entry_ownable(entry).or_insert_with(|| key.to_string());
 		};
 		if value.reverse_property {
-			insert("@type", "@reverse");
+			insert(TypeOrLanguage::Type, "@reverse");
 		}
 		match value.type_mapping.as_ref().map(|s| s.as_str()) {
 			Some("@none") => {
-				insert("@language", "@any");
-				insert("@type", "@any");
+				insert(TypeOrLanguage::Language, "@any");
+				insert(TypeOrLanguage::Type, "@any");
 			}
-			Some(type_mapping) => insert("@type", type_mapping),
+			Some(type_mapping) => insert(TypeOrLanguage::Type, type_mapping),
 			None => {
 				let mut lang_dir = make_lang_dir(
 					value.language_mapping.clone().map(|lang| lang.unwrap_or_else(|| "@null".to_string())),
@@ -596,17 +597,23 @@ pub fn create_inverse_context<T: ForeignMutableJson + BuildableJson>(active_cont
 				);
 				if lang_dir == "" {
 					lang_dir = make_lang_dir(active_context.default_language.clone(), active_context.default_base_direction.as_ref());
-					insert("@language", "@none");
-					insert("@type", "@none");
+					insert(TypeOrLanguage::Language, "@none");
+					insert(TypeOrLanguage::Type, "@none");
 				}
-				insert("@language", &lang_dir);
+				insert(TypeOrLanguage::Language, &lang_dir);
 			}
 		}
 	}
 	result
 }
 
-pub fn select_term<'a, T>(active_context: &'a Context<T>, var: &str, containers: Vec<Container>, type_language: &str, preferred_values: Vec<&str>) -> Option<&'a str>
+pub(crate) fn select_term<'a, T>(
+	active_context: &'a Context<T>,
+	var: &str,
+	containers: Vec<Container>,
+	type_language: TypeOrLanguage,
+	preferred_values: Vec<&str>
+) -> Option<&'a str>
 where
 	T: ForeignMutableJson + BuildableJson
 {
@@ -616,6 +623,6 @@ where
 	containers
 		.iter()
 		.filter_map(|container| container_map.get(container))
-		.map(|type_language_map| type_language_map.get(type_language).unwrap())
+		.map(|type_language_map| type_language_map.get(&type_language).unwrap())
 		.find_map(|value_map| preferred_values.iter().find_map(|preferred_value| value_map.get(*preferred_value).map(|s| s.as_str())))
 }

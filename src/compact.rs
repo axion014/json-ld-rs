@@ -34,7 +34,7 @@ use crate::error::Result;
 use crate::expand::expand_iri;
 use crate::remote::LoadDocumentOptions;
 use crate::util::{add_value, is_graph_object, make_lang_dir, resolve};
-use crate::{Context, Direction, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition};
+use crate::{Context, Direction, JsonLdOptions, JsonLdOptionsImpl, JsonLdProcessingMode, RemoteDocument, TermDefinition, TypeOrLanguage};
 
 #[async_recursion(?Send)]
 pub(crate) async fn compact_internal<'a, T, F>(active_context: &Context<'a, T>, active_property: Option<&'a str>, element: T, options: &JsonLdOptionsImpl<T, F>) -> Result<T>
@@ -481,7 +481,7 @@ where
 			value = Some(preserve.get_index(0).unwrap());
 		}
 		let mut containers = Vec::new();
-		let mut type_language = "@language";
+		let mut type_language = TypeOrLanguage::Language;
 		let mut type_language_value = "@null".to_string();
 
 		macro_rules! add_containers { ($($kind:ident),+) => { $(containers.push(container!($kind)));+ } }
@@ -492,12 +492,12 @@ where
 			}
 		}
 		let mut set_default = || {
-			type_language = "@type";
+			type_language = TypeOrLanguage::Type;
 			type_language_value = "@id".to_string();
 			add_containers!(id, ids, type, types);
 		};
 		if reverse {
-			type_language = "@type";
+			type_language = TypeOrLanguage::Type;
 			type_language_value = "@reverse".to_string();
 			containers.push(container!(set));
 		} else if let Some(value) = value {
@@ -546,7 +546,7 @@ where
 					let common_language = common_language.unwrap_or_else(|| "@none".to_string());
 					let common_type = common_type.unwrap_or("@none");
 					if common_type != "@none" {
-						type_language = "@type";
+						type_language = TypeOrLanguage::Type;
 						type_language_value = common_type.to_string();
 					} else {
 						type_language_value = common_language;
@@ -566,7 +566,7 @@ where
 						add_containers!(id_graph, ids_graph);
 					}
 					add_containers!(index, indexes);
-					type_language = "@type";
+					type_language = TypeOrLanguage::Type;
 					type_language_value = "@id".to_string();
 				} else {
 					if value.contains("@value") {
@@ -582,7 +582,7 @@ where
 							} else {
 								if let Some(ty) = value.get("@type") {
 									type_language_value = ty.as_string().unwrap().to_string();
-									type_language = "@type";
+									type_language = TypeOrLanguage::Type;
 								}
 							}
 						}
@@ -638,7 +638,7 @@ where
 		}
 		preferred_values.push("@none");
 		if value.and_then(|value| value.get_attr("@list")).and_then(|list| list.as_array()).map(|list| list.len()) == Some(0) {
-			type_language = "@any";
+			type_language = TypeOrLanguage::Any;
 		}
 		preferred_values.push("@any");
 		for i in 0..preferred_values.len() {
