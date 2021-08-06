@@ -35,7 +35,7 @@ fn process_language<T: ForeignJson>(value: &T) -> Result<Option<String>> {
 	Ok(match value.as_enum() {
 		Borrowed::String(lang) => Some(lang.to_owned()),
 		Borrowed::Null => None,
-		_ => return Err(err!(InvalidDefaultLanguage))
+		_ => return Err(err!(InvalidLanguageMapping))
 	})
 }
 
@@ -195,7 +195,7 @@ where
 					}
 				}
 				if let Some(value) = json.get("@language") {
-					result.default_language = process_language(value)?;
+					result.default_language = process_language(value).map_err(|_| err!(InvalidDefaultLanguage))?;
 				}
 				if let Some(value) = json.get("@direction") {
 					if let JsonLdProcessingMode::JsonLd1_0 = options.inner.processing_mode {
@@ -339,9 +339,12 @@ where
 					return Ok(ControlFlow::Break(()));
 				}
 				definition.iri = process_context_iri!(active_context, id, local_context, defined, options)?;
-				if term.starts_with(":") || term.ends_with(":") || term.contains("/") {
+				if definition.iri.as_deref() == Some("@context") {
+					return Err(err!(InvalidKeywordAlias));
+				}
+				if (term.len() > 2 && term[1..=(term.len() - 2)].contains(":")) || term.contains("/") {
 					*defined.get_mut(term).unwrap() = true;
-					if definition.iri != process_context_iri!(active_context, id, local_context, defined, options)? {
+					if definition.iri != process_context_iri!(active_context, term, local_context, defined, options)? {
 						return Err(err!(InvalidIRIMapping));
 					}
 				}
@@ -490,6 +493,9 @@ where
 					return Err(err!(InvalidTermDefinition));
 				}
 				let index = index.as_string().ok_or(err!(InvalidTermDefinition))?;
+				if process_context_iri!(active_context, index, local_context, defined, options)?.map_or(true, |index| !is_iri(&index)) {
+					return Err(err!(InvalidTermDefinition));
+				}
 				definition.index_mapping = Some(index.to_string());
 			}
 			if let Some(context) = value.get("@context") {
