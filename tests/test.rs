@@ -183,6 +183,11 @@ async fn evaluate_test(value: Map<String, Value>, test_type: TestType, test_clas
 			|| options.get("https://w3c.github.io/json-ld-api/tests/vocab#contentType").is_some()
 			|| options.get("https://w3c.github.io/json-ld-api/tests/vocab#redirectTo").is_some()
 			|| options.get("https://w3c.github.io/json-ld-api/tests/vocab#httpStatus").is_some()
+			|| options
+				.get("https://w3c.github.io/json-ld-api/tests/vocab#specVersion")
+				.and_then(|v| v.pointer("/0/@value"))
+				.and_then(|v| v.as_str())
+				== Some("json-ld-1.0")
 		{
 			return Ok(TestRecord { name, content: Skip });
 		}
