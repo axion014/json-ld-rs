@@ -321,16 +321,13 @@ where
 
 	let mut active_context = process_context(&Context::default(), &context, context_base.as_ref(), &options, &FrozenSet::new(), false, true, true).await?;
 	if active_context.base_iri.is_none() {
-		active_context.base_iri = if options.inner.compact_to_relative {
-			context_base
-		} else {
-			options
-				.inner
-				.base
-				.as_ref()
-				.map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e)))
-				.transpose()?
-		};
+		active_context.base_iri = options
+			.inner
+			.base
+			.as_ref()
+			.map(|base| Url::parse(base).map_err(|e| err!(InvalidBaseIRI, , e)))
+			.transpose()?
+			.or(options.inner.compact_to_relative.then(|| context_base).flatten());
 	}
 	let compacted_output = compact_internal(&mut active_context, None, expanded_input.into(), &options).await?;
 	let mut compacted_output = match compacted_output.into_enum() {
