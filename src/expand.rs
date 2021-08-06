@@ -694,12 +694,30 @@ where
 				_ => return Err(err!(InvalidTypeValue))
 			}
 		}
-		"@included" if options.inner.processing_mode != JsonLdProcessingMode::JsonLd1_0 => add_value(
-			result,
-			&expanded_property,
-			expand_internal(active_context, None, value, base_url, options, false).await?.into_untyped(),
-			true
-		),
+		"@included" if options.inner.processing_mode != JsonLdProcessingMode::JsonLd1_0 => {
+			let expanded_value = expand_internal(active_context, None, value, base_url, options, false).await?;
+			match expanded_value {
+				Owned::Array(expanded_value) => {
+					for value in expanded_value.iter() {
+						if let Some(obj) = value.as_object() {
+							if obj.contains("@value") || obj.contains("@list") || obj.contains("@set") || obj.contains("@graph") {
+								return Err(err!(InvalidIncludedValue));
+							}
+						} else {
+							return Err(err!(InvalidIncludedValue));
+						}
+					}
+					add_value::<T>(result, &expanded_property, expanded_value.into(), true)
+				}
+				Owned::Object(obj) => {
+					if obj.contains("@value") || obj.contains("@list") || obj.contains("@set") || obj.contains("@graph") {
+						return Err(err!(InvalidIncludedValue));
+					}
+					add_value::<T>(result, &expanded_property, obj.into(), true)
+				}
+				_ => return Err(err!(InvalidIncludedValue))
+			}
+		}
 		_ if result.contains(&expanded_property) => return Err(err!(CollidingKeywords)),
 		"@id" => {
 			result.insert(expanded_property, match value.as_enum() {
