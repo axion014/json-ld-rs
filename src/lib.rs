@@ -449,7 +449,7 @@ where
 		JsonLdInput::JsonObject(json) => {
 			let document_url = options.inner.base.as_ref().map(|url| Url::parse(url).map_err(|e| err!(InvalidBaseIRI, , e))).transpose()?;
 			expand_object(&active_context, None, json, document_url.as_ref(), &options, false).await?
-		},
+		}
 		JsonLdInput::Reference(_) => unreachable!()
 	};
 	Ok(match expanded_output {

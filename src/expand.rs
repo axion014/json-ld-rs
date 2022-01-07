@@ -87,14 +87,7 @@ where
 			}
 			Ok(Owned::Array(result))
 		}
-		Borrowed::Object(obj) => expand_object(
-			active_context,
-			active_property,
-			obj,
-			base_url,
-			options,
-			from_map
-		).await,
+		Borrowed::Object(obj) => expand_object(active_context, active_property, obj, base_url, options, from_map).await,
 		value => {
 			if active_property.is_none() || active_property == Some("@graph") {
 				return Ok(Owned::Null);
@@ -294,10 +287,7 @@ where
 	}
 	if (result.len() == 1 && result.contains("@language"))
 		|| (active_property.is_none() || active_property == Some("@graph"))
-			&& (result.is_empty()
-				|| result.contains("@value")
-				|| result.contains("@list")
-				|| (!options.inner.frame_expansion && result.len() == 1 && result.contains("@id")))
+			&& (result.is_empty() || result.contains("@value") || result.contains("@list") || (!options.inner.frame_expansion && result.len() == 1 && result.contains("@id")))
 	{
 		return Ok(Owned::Null);
 	}
@@ -468,7 +458,11 @@ where
 	return Ok(());
 }
 
-fn expand_language_map<'a, T: ForeignMutableJson + BuildableJson>(active_context: &Context<T>, language_map: impl IntoIterator<Item = (&'a str, &'a T)>, direction: Option<&Direction>) -> Result<T::Array> {
+fn expand_language_map<'a, T: ForeignMutableJson + BuildableJson>(
+	active_context: &Context<T>,
+	language_map: impl IntoIterator<Item = (&'a str, &'a T)>,
+	direction: Option<&Direction>
+) -> Result<T::Array> {
 	let mut result = T::empty_array();
 	for (language, language_value) in language_map.into_iter() {
 		let language = if language != "@none" && expand_iri!(active_context, &language)?.as_deref() != Some("@none") {
@@ -637,7 +631,17 @@ where
 			return Err(err!(InvalidNestValue));
 		}
 	}
-	expand_object_properties(result, active_context, type_scoped_context, active_property, nested_value.iter(), base_url, input_type, options).await
+	expand_object_properties(
+		result,
+		active_context,
+		type_scoped_context,
+		active_property,
+		nested_value.iter(),
+		base_url,
+		input_type,
+		options
+	)
+	.await
 }
 
 async fn expand_keyword<T, F>(

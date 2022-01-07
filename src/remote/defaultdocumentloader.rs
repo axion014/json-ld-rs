@@ -4,7 +4,8 @@ use http_link::{parse_link_header, Link};
 use reqwest::redirect::Policy;
 use reqwest::{header, Client, Response, StatusCode};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_middleware_cache::{managers::CACacheManager, Cache, CacheMode};
+use reqwest_middleware_cache::managers::CACacheManager;
+use reqwest_middleware_cache::{Cache, CacheMode};
 
 use json_trait::{BuildableJson, ForeignMutableJson};
 
