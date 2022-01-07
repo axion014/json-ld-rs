@@ -1,7 +1,10 @@
 use async_recursion::async_recursion;
 use http_link::{parse_link_header, Link};
+
 use reqwest::redirect::Policy;
 use reqwest::{header, Client, Response, StatusCode};
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_middleware_cache::{managers::CACacheManager, Cache, CacheMode};
 
 use json_trait::{BuildableJson, ForeignMutableJson};
 
@@ -12,13 +15,21 @@ use crate::util::OneError;
 use crate::{Document, RemoteDocument};
 
 lazy_static::lazy_static! {
-	static ref IRI_CLIENT: Client = Client::builder().redirect(Policy::custom(|attempt| {
-		match attempt.status() {
-			StatusCode::MULTIPLE_CHOICES | StatusCode::SEE_OTHER => attempt.stop(),
-			_ => Policy::default().redirect(attempt)
-		}
-	})).build().unwrap();
-	static ref REPRESENTATION_CLIENT: Client = Client::new();
+	static ref IRI_CLIENT: ClientWithMiddleware = ClientBuilder::new(Client::builder().redirect(Policy::custom(|attempt| {
+			match attempt.status() {
+				StatusCode::MULTIPLE_CHOICES | StatusCode::SEE_OTHER => attempt.stop(),
+				_ => Policy::default().redirect(attempt)
+			}
+		})).build().unwrap())
+		.with(Cache {
+			mode: CacheMode::Default,
+			cache_manager: CACacheManager::default(),
+		}).build();
+	static ref REPRESENTATION_CLIENT: ClientWithMiddleware = ClientBuilder::new(Client::new())
+		.with(Cache {
+			mode: CacheMode::Default,
+			cache_manager: CACacheManager::default(),
+		}).build();
 }
 
 fn process_link_headers<'a>(response: &'a Response, url: &'a url::Url) -> impl Iterator<Item = Result<Link, JsonLdError>> + 'a {
